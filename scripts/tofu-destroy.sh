@@ -166,6 +166,99 @@ backup_state() {
   return 0
 }
 
+# Best-effort cleanup of leftover empty state files under the same environment
+# prefix. Each `mode: down` run creates a fresh RUN_ID, so its `tofu init`
+# creates a new empty `default.tfstate`. Without this, the bucket accumulates
+# one stub state per run. We only remove empty files (no resources) older than
+# MIN_AGE_MINUTES so we never touch a state that another run might still be using.
+cleanup_empty_state_files() {
+  local env="${ENVIRONMENT:-local}"
+  local project_bucket="${TF_STATE_BUCKET}"
+  if [ -z "$project_bucket" ]; then
+    return 0
+  fi
+  local min_age_minutes="${EMPTY_STATE_MIN_AGE_MINUTES:-60}"
+  local prefix="superapp-demo/${env}/"
+  echo "[tofu-destroy] scanning gs://${project_bucket}/${prefix} for empty state stubs"
+  local stubs
+  stubs="$(gcloud storage ls -r "gs://${project_bucket}/${prefix}" 2>/dev/null \
+    | grep -E '/default\.tfstate$' || true)"
+  if [ -z "$stubs" ]; then
+    return 0
+  fi
+  local stale_resource_warned=""
+  while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    local body
+    body="$(gcloud storage cat "$path" 2>/dev/null || true)"
+    if [ -z "$body" ]; then
+      continue
+    fi
+    # Skip the prefix we just ran against (current run's state).
+    if [ "$path" = "gs://${project_bucket}/${TF_STATE_PREFIX}/default.tfstate" ]; then
+      continue
+    fi
+    # Parse once: empty → consider for cleanup; non-empty → check for stale
+    # resource records whose live GCP counterparts no longer exist.
+    local resource_count
+    resource_count="$(printf '%s' "$body" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(len(d.get('resources') or []))
+except Exception:
+    print(-1)
+")"
+    if [ "$resource_count" = "0" ]; then
+      local updated
+      updated="$(gcloud storage ls -L "$path" 2>/dev/null \
+        | awk '/^[[:space:]]+Update Time:[[:space:]]*/ { sub(/^[[:space:]]+Update Time:[[:space:]]*/, ""); print; exit }')"
+      if [ -z "$updated" ]; then
+        continue
+      fi
+      local age_minutes=$(( ( $(date -u +%s) - $(date -u -d "$updated" +%s) ) / 60 ))
+      if [ "$age_minutes" -lt "$min_age_minutes" ]; then
+        echo "[tofu-destroy] skipping $path (only $age_minutes min old, < $min_age_minutes)"
+        continue
+      fi
+      echo "[tofu-destroy] removing empty state stub $path ($age_minutes min old)"
+      gcloud storage rm "$path" 2>&1 | tail -1 | sed 's/^/  /'
+    elif [ "$resource_count" -gt 0 ] 2>/dev/null && [ -z "$stale_resource_warned" ]; then
+      # Non-empty state file. Check whether its recorded VM still exists in
+      # GCP. If not, surface a warning so the user can investigate.
+      local recorded_instance
+      recorded_instance="$(printf '%s' "$body" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in d.get('resources') or []:
+    if r.get('type') == 'google_compute_instance':
+        for inst in r.get('instances', []) or []:
+            attrs = (inst.get('attributes') or {})
+            name = attrs.get('name')
+            if name:
+                print(name); sys.exit(0)
+        # Fall back to the resource name.
+        print(r.get('name', '')); sys.exit(0)
+" 2>/dev/null)"
+      if [ -n "$recorded_instance" ]; then
+        local live
+        live="$(gcloud compute instances describe "$recorded_instance" \
+                 --zone="$ZONE" --project="$PROJECT_ID" \
+                 --format='value(name)' 2>/dev/null || true)"
+        if [ -z "$live" ]; then
+          echo "[tofu-destroy] NOTE: $path still records '$recorded_instance' but the VM no longer exists in GCP"
+          echo "[tofu-destroy]       this is normal when a previous run's orphan_cleanup deleted the VM"
+          echo "[tofu-destroy]       but its state file was left for forensics; you can rm it manually if no longer needed"
+          stale_resource_warned="1"
+        fi
+      fi
+    fi
+  done <<< "$stubs"
+}
+
 # Reconfigure backend (idempotent).
 tofu init -input=false -reconfigure -backend-config=backend.hcl -no-color
 
@@ -188,6 +281,9 @@ set -e
 orphan_cleanup
 
 backup_state
+
+# Best-effort: clean up leftover empty state stubs from past `mode: down` runs.
+cleanup_empty_state_files
 
 if [ "$DESTROY_RC" -ne 0 ]; then
   echo "[tofu-destroy] destroy failed with rc=$DESTROY_RC"
