@@ -86,3 +86,21 @@ variable "create_firewall_rules" {
   default     = false
   description = "Create temporary SSH/HTTP firewall rules. Requires compute.firewalls.create and compute.networks.updatePolicy. Default false so least-privileged VM creation works with pre-existing/default firewall rules."
 }
+
+variable "add_ssh_key" {
+  type        = bool
+  default     = true
+  description = "Add an instance-level SSH public key from ssh_public_key_path to the VM metadata."
+}
+
+variable "ssh_user" {
+  type        = string
+  default     = "eslutsky"
+  description = "Linux username for the instance-level SSH key metadata entry."
+}
+
+variable "ssh_public_key_path" {
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+  description = "Local SSH public key path to add to instance metadata by default."
+}

@@ -8,6 +8,10 @@ locals {
     run_id      = local.safe_run_id
     environment = var.environment
   }
+
+  ssh_metadata = var.add_ssh_key ? {
+    ssh-keys = "${var.ssh_user}:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+  } : {}
 }
 
 data "google_compute_image" "os" {
@@ -66,6 +70,8 @@ resource "google_compute_instance" "demo" {
     network = "default"
     access_config {}
   }
+
+  metadata = local.ssh_metadata
 
   metadata_startup_script = templatefile("${path.module}/startup-script.sh.tftpl", {
     demo_port   = var.demo_port

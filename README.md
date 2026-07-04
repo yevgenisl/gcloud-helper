@@ -40,6 +40,9 @@ BOOT_DISK_SIZE_GB=30
 BOOT_DISK_TYPE=pd-balanced
 DEMO_PORT=8080
 CREATE_FIREWALL_RULES=false
+ADD_SSH_KEY=true
+SSH_USER=<local whoami>
+SSH_PUBLIC_KEY_PATH=~/.ssh/id_rsa.pub
 ```
 
 State bucket defaults to:
@@ -52,6 +55,40 @@ Override any variable through environment variables, for example:
 
 ```bash
 ZONE=europe-west1-c RUN_ID=local-test make demo-up
+```
+
+## SSH key behavior
+
+By default, each VM gets an instance-level SSH metadata entry from:
+
+```text
+~/.ssh/id_rsa.pub
+```
+
+The wrapper passes:
+
+```text
+ADD_SSH_KEY=true
+SSH_USER=$(whoami)
+SSH_PUBLIC_KEY_PATH=$HOME/.ssh/id_rsa.pub
+```
+
+Override when needed:
+
+```bash
+SSH_USER=demo SSH_PUBLIC_KEY_PATH=~/.ssh/demo.pub make demo-up
+```
+
+Disable instance-level SSH key injection:
+
+```bash
+ADD_SSH_KEY=false make demo-up
+```
+
+Verified locally with raw SSH:
+
+```bash
+ssh -i ~/.ssh/id_rsa "$USER@<external-ip>" 'curl -fsS http://127.0.0.1:8080/health'
 ```
 
 ## Permission notes

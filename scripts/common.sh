@@ -12,6 +12,9 @@ TF_STATE_BUCKET="${TF_STATE_BUCKET:-${PROJECT_ID}-tofu-state}"
 TF_STATE_PREFIX="${TF_STATE_PREFIX:-superapp-demo/${ENVIRONMENT}/${RUN_ID}}"
 DEMO_PORT="${DEMO_PORT:-8080}"
 CREATE_FIREWALL_RULES="${CREATE_FIREWALL_RULES:-false}"
+ADD_SSH_KEY="${ADD_SSH_KEY:-true}"
+SSH_USER="${SSH_USER:-$(whoami)}"
+SSH_PUBLIC_KEY_PATH="${SSH_PUBLIC_KEY_PATH:-$HOME/.ssh/id_rsa.pub}"
 GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/service-accounts/hermess-sa.json}"
 export GOOGLE_APPLICATION_CREDENTIALS
 
@@ -43,4 +46,7 @@ tofu_vars() {
   printf -- '-var=run_id=%q ' "$RUN_ID"
   printf -- '-var=demo_port=%q ' "$DEMO_PORT"
   printf -- '-var=create_firewall_rules=%q ' "$CREATE_FIREWALL_RULES"
+  printf -- '-var=add_ssh_key=%q ' "$ADD_SSH_KEY"
+  printf -- '-var=ssh_user=%q ' "$SSH_USER"
+  printf -- '-var=ssh_public_key_path=%q ' "$SSH_PUBLIC_KEY_PATH"
 }
