@@ -9,7 +9,7 @@ TF_DIR := infra/gcp-demo-vm
 
 export PROJECT_ID REGION ZONE ENVIRONMENT RUN_ID TF_STATE_BUCKET
 
-.PHONY: init demo-up demo-status demo-smoke demo-down demo-clean-stale fmt validate
+.PHONY: init demo-up demo-status demo-smoke deploy-compose demo-down demo-clean-stale fmt validate
 
 init:
 	./scripts/bootstrap-state-bucket.sh
@@ -29,6 +29,9 @@ demo-status:
 
 demo-smoke:
 	./scripts/demo-smoke.sh
+
+deploy-compose:
+	./scripts/deploy-compose-on-vm.sh
 
 demo-down:
 	./scripts/demo-down.sh

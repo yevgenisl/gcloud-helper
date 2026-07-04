@@ -83,9 +83,37 @@ on:
         type: string
         required: false
         default: ""
+      app_deploy:
+        description: "Upload and deploy a Docker Compose app repo to the VM after provisioning."
+        type: boolean
+        required: false
+        default: false
+      app_repo:
+        description: "GitHub repository to deploy. Empty means the caller repository."
+        type: string
+        required: false
+        default: ""
+      app_ref:
+        description: "Git ref to deploy. Empty means the caller ref name."
+        type: string
+        required: false
+        default: ""
+      app_name:
+        description: "Application name used for the remote /opt/<name> directory."
+        type: string
+        required: false
+        default: canabis-assistant-api
+      app_port:
+        description: "Host port for the app compose stack. Defaults to demo_port."
+        type: string
+        required: false
+        default: "8080"
     secrets:
       infra_repo_token:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
+        required: false
+      app_env:
+        description: "Optional .env file content to place beside the app compose file on the VM. Use only GitHub secrets, never plaintext workflow inputs."
         required: false
     outputs:
       run_id:
@@ -132,6 +160,31 @@ on:
         type: string
         required: false
         default: ""
+      app_deploy:
+        description: "Upload and deploy the caller/app Docker Compose repo to the VM."
+        type: boolean
+        required: false
+        default: false
+      app_repo:
+        description: "GitHub repository to deploy. Empty means this repository."
+        type: string
+        required: false
+        default: ""
+      app_ref:
+        description: "Git ref to deploy. Empty means this ref."
+        type: string
+        required: false
+        default: ""
+      app_name:
+        description: "Application name used under /opt."
+        type: string
+        required: false
+        default: canabis-assistant-api
+      app_port:
+        description: "Host port for the app compose stack. Defaults to 8080."
+        type: string
+        required: false
+        default: "8080"
       workload_identity_provider:
         description: "GCP Workload Identity Provider resource name."
         type: string
@@ -171,6 +224,11 @@ env:
   MAX_RUN_DURATION_SECONDS: ${{ inputs.max_run_duration_seconds || '10800' }}
   ADD_SSH_KEY: ${{ inputs.add_ssh_key }}
   SSH_USER: ${{ inputs.ssh_user || 'runner' }}
+  APP_DEPLOY: ${{ inputs.app_deploy }}
+  APP_REPO: ${{ inputs.app_repo != '' && inputs.app_repo || github.repository }}
+  APP_REF: ${{ inputs.app_ref != '' && inputs.app_ref || github.ref_name }}
+  APP_NAME: ${{ inputs.app_name || 'canabis-assistant-api' }}
+  APP_PORT: ${{ inputs.app_port || inputs.demo_port || '8080' }}
 
 jobs:
   demo-vm:
@@ -203,6 +261,14 @@ jobs:
           ref: ${{ env.INFRA_REF }}
           path: demo-vm-infra
           token: ${{ secrets.infra_repo_token || github.token }}
+
+      - name: Checkout app repo for compose deployment
+        if: ${{ inputs.app_deploy }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPO }}
+          ref: ${{ env.APP_REF }}
+          path: app-source
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2.1.7
@@ -255,6 +321,31 @@ jobs:
           echo "zone=$(tofu output -raw zone)" >> "$GITHUB_OUTPUT"
           echo "external_ip=$(tofu output -raw external_ip)" >> "$GITHUB_OUTPUT"
           echo "demo_url=$(tofu output -raw demo_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare optional app env file
+        if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
+        shell: bash
+        env:
+          APP_ENV_CONTENT: ${{ secrets.app_env }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APP_ENV_CONTENT" ]; then
+            printf '%s\n' "$APP_ENV_CONTENT" > "$RUNNER_TEMP/app.env"
+            chmod 0600 "$RUNNER_TEMP/app.env"
+            echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
+          fi
+
+      - name: Deploy app Docker Compose stack to VM
+        if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
+        working-directory: demo-vm-infra
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_SOURCE_DIR="$GITHUB_WORKSPACE/app-source" \
+          APP_NAME="$APP_NAME" \
+          APP_PORT="$APP_PORT" \
+          REMOTE_APP_DIR="/opt/$APP_NAME" \
+          make deploy-compose
 
       - name: Smoke test demo VM
         if: ${{ inputs.mode == 'smoke' || inputs.mode == 'e2e' }}

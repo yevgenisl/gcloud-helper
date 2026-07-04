@@ -168,10 +168,37 @@ Auth uses the known-good Workload Identity Federation pattern:
 
 | Mode | Behavior |
 |---|---|
-| `e2e` | `make init`, `make demo-up`, `make demo-smoke`, `make demo-down` in `always()` cleanup. Best default for CI. |
+| `e2e` | `make init`, `make demo-up`, optional compose deploy, `make demo-smoke`, `make demo-down` in `always()` cleanup. Best default for CI. |
 | `up` | Provisions the VM and exposes outputs for downstream jobs. |
 | `smoke` | Runs smoke check against an existing `run_id` state. |
 | `down` | Destroys resources for an existing `run_id` state. Use in `if: always()` cleanup jobs. |
+
+### Optional Docker Compose app deployment
+
+The workflow can deploy the caller/app repository to the VM after provisioning:
+
+```yaml
+with:
+  mode: e2e
+  app_deploy: true
+  app_repo: yevgenisl/canabis-assistant-api
+  app_ref: ${{ github.ref_name }}
+  app_name: canabis-assistant-api
+  app_port: "8080"
+  create_firewall_rules: true
+```
+
+Deployment behavior:
+
+1. checks out the app repo in the GitHub runner;
+2. packages it without `.git`;
+3. uploads it to the VM with `gcloud compute scp`;
+4. extracts it under `/opt/<app_name>`;
+5. writes a safe default `.env` when no `app_env` secret is provided;
+6. runs `podman compose` / `podman-compose` with `postgres api`;
+7. verifies `http://127.0.0.1:<app_port>/health` from inside the VM.
+
+For real non-mock LLM mode, pass a workflow secret named `app_env` containing the desired `.env` content. Do not put API keys in workflow inputs.
 
 ### Outputs
 
