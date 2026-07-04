@@ -69,6 +69,12 @@ variable "demo_port" {
   description = "HTTP demo/smoke-test port."
 }
 
+variable "start_helper_health" {
+  type        = bool
+  default     = true
+  description = "Start the built-in helper health service on demo_port. Disable when the caller deploys an app that binds demo_port."
+}
+
 variable "allow_ssh_cidr" {
   type        = string
   default     = "0.0.0.0/0"

@@ -11,6 +11,12 @@ elif command -v yum >/dev/null 2>&1; then
   yum -y install podman git curl jq python3 || true
 fi
 
+if [ "${start_helper_health}" != "true" ]; then
+  systemctl enable --now podman.socket || true
+  echo "startup complete without helper health service" >/opt/hermes-demo/ready
+  exit 0
+fi
+
 cat >/opt/hermes-demo/health_server.py <<'PY'
 #!/usr/bin/env python3
 import http.server

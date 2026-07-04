@@ -218,7 +218,8 @@ env:
   ZONE: ${{ inputs.zone || 'europe-west1-b' }}
   ENVIRONMENT: ${{ inputs.environment || 'ci' }}
   RUN_ID: ${{ inputs.run_id != '' && inputs.run_id || format('gh-{0}', github.run_id) }}
-  DEMO_PORT: ${{ inputs.demo_port || '8080' }}
+  DEMO_PORT: ${{ inputs.demo_port }}
+  START_HELPER_HEALTH: ${{ inputs.app_deploy && 'false' || 'true' }}
   CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules }}
   AUTO_DELETE_AFTER_DURATION: ${{ inputs.auto_delete_after_duration }}
   MAX_RUN_DURATION_SECONDS: ${{ inputs.max_run_duration_seconds || '10800' }}

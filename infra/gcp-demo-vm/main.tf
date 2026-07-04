@@ -74,11 +74,12 @@ resource "google_compute_instance" "demo" {
   metadata = local.ssh_metadata
 
   metadata_startup_script = templatefile("${path.module}/startup-script.sh.tftpl", {
-    demo_port   = var.demo_port
-    region      = var.region
-    zone        = var.zone
-    environment = var.environment
-    run_id      = local.safe_run_id
+    demo_port           = var.demo_port
+    start_helper_health = var.start_helper_health
+    region              = var.region
+    zone                = var.zone
+    environment         = var.environment
+    run_id              = local.safe_run_id
   })
 
   scheduling {
