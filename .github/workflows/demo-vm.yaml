@@ -359,3 +359,23 @@ jobs:
         working-directory: demo-vm-infra
         shell: bash
         run: make demo-down
+
+      # Always push the latest local state to GCS and emit a workflow
+      # artifact, so a partial apply (or a runner abort) never strands
+      # state only on disk. Idempotent and runs even if upstream failed.
+      - name: Upload tofu state snapshot (always)
+        if: ${{ always() }}
+        working-directory: demo-vm-infra
+        shell: bash
+        run: make tofu-state-snapshot || true
+
+      - name: Upload tofu state backups to workflow artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tofu-state-backups-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/hermes-tofu-state-backups/**
+            ${{ env.TF_STATE_PREFIX || 'superapp-demo' }}/local/local/terraform.tfstate
+          if-no-files-found: ignore
+          retention-days: 30

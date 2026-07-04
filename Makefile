@@ -9,7 +9,7 @@ TF_DIR := infra/gcp-demo-vm
 
 export PROJECT_ID REGION ZONE ENVIRONMENT RUN_ID TF_STATE_BUCKET
 
-.PHONY: init demo-up demo-status demo-smoke deploy-compose demo-down demo-clean-stale fmt validate
+.PHONY: init demo-up demo-status demo-smoke deploy-compose demo-down tofu-state-snapshot demo-clean-stale fmt validate
 
 init:
 	./scripts/bootstrap-state-bucket.sh
@@ -22,7 +22,7 @@ validate: init
 	cd $(TF_DIR) && tofu validate
 
 demo-up: init
-	./scripts/demo-up.sh
+	./scripts/tofu-apply.sh
 
 demo-status:
 	./scripts/demo-status.sh
@@ -34,7 +34,13 @@ deploy-compose:
 	./scripts/deploy-compose-on-vm.sh
 
 demo-down:
-	./scripts/demo-down.sh
+	./scripts/tofu-destroy.sh
+
+# Upload the on-disk state to GCS and emit a local backup. Safe to call any
+# number of times. Used by the CI workflow on `if: always()` so a partial
+# apply always leaves recoverable state behind.
+tofu-state-snapshot:
+	./scripts/tofu-state-snapshot.sh
 
 demo-clean-stale:
 	./scripts/janitor-cleanup.sh
