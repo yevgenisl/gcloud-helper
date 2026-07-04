@@ -70,13 +70,22 @@ fi
 
 systemctl enable --now podman.socket || true
 systemctl stop hermes-demo-health.service 2>/dev/null || true
+systemctl kill --kill-who=all hermes-demo-health.service 2>/dev/null || true
 systemctl disable hermes-demo-health.service 2>/dev/null || true
+systemctl mask hermes-demo-health.service 2>/dev/null || true
 pkill -f '/opt/hermes-demo/health_server.py' 2>/dev/null || true
-if command -v ss >/dev/null 2>&1; then
-  for pid in $(ss -ltnp "sport = :$APP_PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u); do
+for i in $(seq 1 20); do
+  if ! ss -ltnp 2>/dev/null | awk -v port=":$APP_PORT" '$4 ~ port"$" {found=1} END {exit found ? 0 : 1}'; then
+    break
+  fi
+  ss -ltnp 2>/dev/null | awk -v port=":$APP_PORT" '$4 ~ port"$" {print $0}'
+  for pid in $(ss -ltnp 2>/dev/null | awk -v port=":$APP_PORT" '$4 ~ port"$" {print $0}' | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u); do
     kill "$pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
   done
-fi
+  sleep 1
+done
 mkdir -p "$REMOTE_APP_DIR"
 rm -rf "${REMOTE_APP_DIR:?}"/*
 tar -xzf "$REMOTE_ARCHIVE" -C "$REMOTE_APP_DIR"
