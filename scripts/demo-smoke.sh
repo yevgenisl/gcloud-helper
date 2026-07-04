@@ -11,7 +11,7 @@ for i in $(seq 1 60); do
   if gcloud compute ssh "$NAME" --zone "$ZONE_OUT" --project "$PROJECT_ID" --quiet --command "curl -fsS --max-time 5 http://127.0.0.1:${DEMO_PORT}/health" | tee /tmp/hermes-demo-health.json; then
     echo
     echo "Smoke test OK via SSH. Public URL, if firewall allows it: $HEALTH"
-    git config --global --add safe.directory ${{ env.APP_DIR }}
+    git config --global --add safe.directory "${{ env.APP_DIR }}"
     GIT_TOKEN="${{ secrets.GITHUB_TOKEN }}"
     GIT_REPO="${{ github.repository }}"
     echo ${GIT_TOKEN} >> /tmp/test
