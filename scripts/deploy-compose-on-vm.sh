@@ -71,6 +71,12 @@ fi
 systemctl enable --now podman.socket || true
 systemctl stop hermes-demo-health.service 2>/dev/null || true
 systemctl disable hermes-demo-health.service 2>/dev/null || true
+pkill -f '/opt/hermes-demo/health_server.py' 2>/dev/null || true
+if command -v ss >/dev/null 2>&1; then
+  for pid in $(ss -ltnp "sport = :$APP_PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u); do
+    kill "$pid" 2>/dev/null || true
+  done
+fi
 mkdir -p "$REMOTE_APP_DIR"
 rm -rf "${REMOTE_APP_DIR:?}"/*
 tar -xzf "$REMOTE_ARCHIVE" -C "$REMOTE_APP_DIR"
