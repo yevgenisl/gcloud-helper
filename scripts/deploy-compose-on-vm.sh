@@ -53,9 +53,19 @@ REMOTE_ARCHIVE="__REMOTE_ARCHIVE__"
 REMOTE_ENV="__REMOTE_ENV__"
 
 if command -v dnf >/dev/null 2>&1; then
-  dnf -y install podman podman-compose git curl jq python3 || dnf -y install podman git curl jq python3
+  # Avoid racing the GCE metadata startup script's own dnf transaction.
+  for i in $(seq 1 60); do
+    if [ -f /opt/hermes-demo/ready ]; then
+      break
+    fi
+    echo "waiting for VM startup bootstrap to finish before package install ($i/60)"
+    sleep 5
+  done
+  dnf -y install podman git curl jq python3
+  dnf -y install podman-compose || true
 elif command -v yum >/dev/null 2>&1; then
-  yum -y install podman podman-compose git curl jq python3 || yum -y install podman git curl jq python3
+  yum -y install podman git curl jq python3
+  yum -y install podman-compose || true
 fi
 
 systemctl enable --now podman.socket || true
