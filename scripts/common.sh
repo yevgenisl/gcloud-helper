@@ -23,7 +23,9 @@ ensure_prereqs() {
   require_cmd gcloud
   require_cmd tofu
   require_cmd curl
-  gcloud config set project "$PROJECT_ID" >/dev/null
+  # Do not run `gcloud config set project` here: when Cloud Resource Manager is
+  # disabled for the project, that command emits noisy warnings even though the
+  # explicit `--project` flags used by these scripts work correctly.
 }
 
 write_backend_config() {
