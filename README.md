@@ -56,9 +56,23 @@ ZONE=europe-west1-c RUN_ID=local-test make demo-up
 
 ## Permission notes
 
-The current Hermes service account can create/delete VMs, but remote GCS state bootstrap and firewall creation require extra permissions:
+The Hermes service account has been verified for:
 
-- state bucket bootstrap: `storage.buckets.create`, `storage.buckets.get`, `storage.buckets.update`, and object access on the state bucket;
-- optional firewall creation: `compute.firewalls.create` and `compute.networks.updatePolicy`.
+- VM create/delete;
+- remote GCS state bucket bootstrap/use;
+- optional temporary firewall rule create/delete.
 
-Until firewall permissions are granted, `CREATE_FIREWALL_RULES=false` and `make demo-smoke` checks the in-VM health endpoint through `gcloud compute ssh`.
+Use the safer default for CI smoke checks:
+
+```bash
+CREATE_FIREWALL_RULES=false make demo-up
+make demo-smoke
+```
+
+Use public demo access when needed:
+
+```bash
+CREATE_FIREWALL_RULES=true make demo-up
+```
+
+With `CREATE_FIREWALL_RULES=true`, OpenTofu creates temporary HTTP `8080` and SSH `22` firewall rules for the VM tag and removes them on `make demo-down`.
