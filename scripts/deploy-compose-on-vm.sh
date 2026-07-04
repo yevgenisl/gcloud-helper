@@ -121,7 +121,7 @@ else
 fi
 
 "${COMPOSE[@]}" config >/tmp/${APP_NAME}-compose-config.txt
-"${COMPOSE[@]}" up -d --build postgres api
+"${COMPOSE[@]}" up -d --build
 "${COMPOSE[@]}" ps
 
 for i in $(seq 1 60); do
