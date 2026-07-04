@@ -114,17 +114,17 @@ echo "${APP_NAME} compose deployment failed health check" >&2
 exit 1
 REMOTE
 
-python3 - "$DEPLOY_SCRIPT_LOCAL" <<'PY'
+python3 - "$DEPLOY_SCRIPT_LOCAL" "$APP_NAME" "$APP_PORT" "$REMOTE_APP_DIR" "$REMOTE_ARCHIVE" "$REMOTE_ENV" <<'PY'
 from pathlib import Path
 import sys
 p=Path(sys.argv[1])
 s=p.read_text()
 repls={
-    '__APP_NAME__': '${APP_NAME}',
-    '__APP_PORT__': '${APP_PORT}',
-    '__REMOTE_APP_DIR__': '${REMOTE_APP_DIR}',
-    '__REMOTE_ARCHIVE__': '${REMOTE_ARCHIVE}',
-    '__REMOTE_ENV__': '${REMOTE_ENV}',
+    '__APP_NAME__': sys.argv[2],
+    '__APP_PORT__': sys.argv[3],
+    '__REMOTE_APP_DIR__': sys.argv[4],
+    '__REMOTE_ARCHIVE__': sys.argv[5],
+    '__REMOTE_ENV__': sys.argv[6],
 }
 for k,v in repls.items():
     s=s.replace(k, v)
