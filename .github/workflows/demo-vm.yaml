@@ -376,6 +376,6 @@ jobs:
           name: tofu-state-backups-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/hermes-tofu-state-backups/**
-            ${{ env.TF_STATE_PREFIX || 'superapp-demo' }}/local/local/terraform.tfstate
+            demo-vm-infra/infra/gcp-demo-vm/terraform.tfstate
           if-no-files-found: ignore
           retention-days: 30

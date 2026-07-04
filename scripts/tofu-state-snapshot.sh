@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Push the on-disk tofu state to the GCS backend and emit a local backup.
+# Capture a snapshot of the current backend state into a timestamped backup
+# file. Designed to be called from CI on `if: always()` so a partial apply
+# leaves recoverable state behind even if the workflow is later aborted.
+# Idempotent.
 #
-# Designed to be called from CI on `if: always()` so a partial apply leaves
-# recoverable state behind even if the workflow is later aborted, the runner
-# is reused, or the runner's checkout is wiped. Idempotent.
+# Why no `tofu state push`:
+#   `tofu apply` / `tofu destroy` already wrote the canonical state to the GCS
+#   backend. This script's only job is to make sure a local backup exists so a
+#   runner cleanup / aborted workflow doesn't strand the state on disk.
 
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -20,27 +24,17 @@ BACKUP="$BACKUP_DIR/${SAFE_PREFIX}__$STAMP.tfstate.json"
 
 tofu init -input=false -reconfigure -backend-config=backend.hcl -no-color >/dev/null 2>&1 || true
 
-# If the local working dir has no state file (e.g. fresh checkout or backend
-# was empty), pull from GCS first so the snapshot has something concrete.
-if [ ! -f "$STATE_LOCAL" ]; then
-  if tofu state pull -no-color > "$STATE_LOCAL" 2>/dev/null; then
-    echo "[tofu-state-snapshot] pulled remote state into local $STATE_LOCAL"
-  else
-    echo "[tofu-state-snapshot] no local or remote state to push (gs://${TF_STATE_BUCKET}/${TF_STATE_PREFIX})"
-    exit 0
-  fi
-fi
-
-cp "$STATE_LOCAL" "$BACKUP"
-echo "[tofu-state-snapshot] saved local backup: $BACKUP"
-
-# Clear any stale lock from a crashed previous run, then push.
-tofu force-unlock -force 2>/dev/null || true
-
-if tofu state push "$STATE_LOCAL" -no-color 2>&1 | tail -10; then
-  echo "[tofu-state-snapshot] pushed to gs://${TF_STATE_BUCKET}/${TF_STATE_PREFIX}/default.tfstate"
+# Prefer backend (canonical). Fall back to local if backend pull fails.
+pulled="$(tofu state pull -no-color 2>/dev/null || true)"
+if [ -n "$pulled" ]; then
+  printf '%s' "$pulled" > "$BACKUP"
+  echo "[tofu-state-snapshot] saved backend state snapshot: $BACKUP"
+elif [ -f "$STATE_LOCAL" ] && [ -s "$STATE_LOCAL" ]; then
+  cp "$STATE_LOCAL" "$BACKUP"
+  echo "[tofu-state-snapshot] saved local state snapshot (backend pull empty): $BACKUP"
 else
-  echo "[tofu-state-snapshot] WARN: state push failed; local backup at $BACKUP is still safe"
+  echo "[tofu-state-snapshot] no state to snapshot (gs://${TF_STATE_BUCKET}/${TF_STATE_PREFIX})"
+  exit 0
 fi
 
 # Print the resource list for log visibility.
