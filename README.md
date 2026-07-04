@@ -124,6 +124,102 @@ Verified locally with raw SSH:
 ssh -i ~/.ssh/id_rsa "$USER@<external-ip>" 'curl -fsS http://127.0.0.1:8080/health'
 ```
 
+## Reusable GitHub Actions workflow
+
+This repo exposes a reusable workflow:
+
+```text
+.github/workflows/demo-vm.yaml
+```
+
+Use it from another repo as a job:
+
+```yaml
+name: Demo VM smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  demo-vm:
+    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    with:
+      mode: e2e
+      environment: ci
+      run_id: superapp-${{ github.run_id }}
+      create_firewall_rules: false
+      max_run_duration_seconds: "10800"
+```
+
+Auth uses the known-good Workload Identity Federation pattern:
+
+```yaml
+- uses: google-github-actions/auth@v2.1.7
+  with:
+    workload_identity_provider: projects/370364006392/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+    service_account: github-actions-sa@canaverse.iam.gserviceaccount.com
+```
+
+### Modes
+
+| Mode | Behavior |
+|---|---|
+| `e2e` | `make init`, `make demo-up`, `make demo-smoke`, `make demo-down` in `always()` cleanup. Best default for CI. |
+| `up` | Provisions the VM and exposes outputs for downstream jobs. |
+| `smoke` | Runs smoke check against an existing `run_id` state. |
+| `down` | Destroys resources for an existing `run_id` state. Use in `if: always()` cleanup jobs. |
+
+### Outputs
+
+The reusable workflow exposes:
+
+```text
+run_id
+instance_name
+zone
+external_ip
+demo_url
+```
+
+Example provision-only flow from a caller repo:
+
+```yaml
+jobs:
+  demo-up:
+    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      mode: up
+      run_id: superapp-${{ github.run_id }}
+      create_firewall_rules: true
+
+  use-demo:
+    runs-on: ubuntu-latest
+    needs: demo-up
+    steps:
+      - run: curl -fsS "${{ needs.demo-up.outputs.demo_url }}/health"
+
+  demo-down:
+    if: always()
+    needs: [demo-up, use-demo]
+    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      mode: down
+      run_id: superapp-${{ github.run_id }}
+      create_firewall_rules: true
+```
+
+For private cross-repo checkout edge cases, pass a secret named `infra_repo_token` with `contents:read` on this infra repo.
+
 ## Permission notes
 
 The Hermes service account has been verified for:

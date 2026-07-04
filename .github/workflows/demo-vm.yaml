@@ -1,0 +1,249 @@
+name: Reusable GCP Ephemeral Demo VM
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "Lifecycle mode: up, smoke, down, or e2e. e2e runs up + smoke + down(always)."
+        type: string
+        required: false
+        default: e2e
+      infra_ref:
+        description: "Ref of yevgenisl/gcp-ephemeral-demo-vm to check out."
+        type: string
+        required: false
+        default: main
+      project_id:
+        description: "GCP project ID."
+        type: string
+        required: false
+        default: canaverse
+      workload_identity_provider:
+        description: "GCP Workload Identity Provider resource name."
+        type: string
+        required: false
+        default: projects/370364006392/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      service_account:
+        description: "GCP service account to impersonate."
+        type: string
+        required: false
+        default: github-actions-sa@canaverse.iam.gserviceaccount.com
+      environment:
+        description: "Environment label and tfstate path segment."
+        type: string
+        required: false
+        default: ci
+      run_id:
+        description: "Stable run id for names/state. Leave empty to use gh-<github.run_id>."
+        type: string
+        required: false
+        default: ""
+      region:
+        description: "GCP region."
+        type: string
+        required: false
+        default: europe-west1
+      zone:
+        description: "GCP zone."
+        type: string
+        required: false
+        default: europe-west1-b
+      demo_port:
+        description: "Demo health endpoint port."
+        type: string
+        required: false
+        default: "8080"
+      create_firewall_rules:
+        description: "Create temporary HTTP/SSH firewall rules."
+        type: boolean
+        required: false
+        default: false
+      auto_delete_after_duration:
+        description: "Enable GCP VM auto-delete safety backstop."
+        type: boolean
+        required: false
+        default: true
+      max_run_duration_seconds:
+        description: "VM max runtime before GCP auto-delete. Default 3h."
+        type: string
+        required: false
+        default: "10800"
+      add_ssh_key:
+        description: "Add instance-level SSH public key metadata."
+        type: boolean
+        required: false
+        default: true
+      ssh_user:
+        description: "Linux username for injected public SSH key."
+        type: string
+        required: false
+        default: runner
+      public_ssh_key:
+        description: "Optional public SSH key text. If empty and add_ssh_key=true, a throwaway CI key is generated."
+        type: string
+        required: false
+        default: ""
+    secrets:
+      infra_repo_token:
+        description: "Optional token with contents:read for checking out this private infra repo from another private repo."
+        required: false
+    outputs:
+      run_id:
+        description: "Resolved run id."
+        value: ${{ jobs.demo-vm.outputs.run_id }}
+      instance_name:
+        description: "Created VM name."
+        value: ${{ jobs.demo-vm.outputs.instance_name }}
+      zone:
+        description: "Created VM zone."
+        value: ${{ jobs.demo-vm.outputs.zone }}
+      external_ip:
+        description: "Created VM external IP."
+        value: ${{ jobs.demo-vm.outputs.external_ip }}
+      demo_url:
+        description: "Created VM public demo URL."
+        value: ${{ jobs.demo-vm.outputs.demo_url }}
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Lifecycle mode: up, smoke, down, or e2e."
+        type: choice
+        options: [up, smoke, down, e2e]
+        required: true
+        default: e2e
+      run_id:
+        description: "Stable run id. Leave empty to use gh-<github.run_id>."
+        type: string
+        required: false
+        default: ""
+      create_firewall_rules:
+        description: "Create temporary HTTP/SSH firewall rules."
+        type: boolean
+        required: false
+        default: false
+      max_run_duration_seconds:
+        description: "VM max runtime before GCP auto-delete. Default 3h."
+        type: string
+        required: false
+        default: "10800"
+      public_ssh_key:
+        description: "Optional public SSH key text."
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  INFRA_REPO: yevgenisl/gcp-ephemeral-demo-vm
+  INFRA_REF: ${{ inputs.infra_ref || 'main' }}
+  PROJECT_ID: ${{ inputs.project_id || 'canaverse' }}
+  REGION: ${{ inputs.region || 'europe-west1' }}
+  ZONE: ${{ inputs.zone || 'europe-west1-b' }}
+  ENVIRONMENT: ${{ inputs.environment || 'ci' }}
+  RUN_ID: ${{ inputs.run_id != '' && inputs.run_id || format('gh-{0}', github.run_id) }}
+  DEMO_PORT: ${{ inputs.demo_port || '8080' }}
+  CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules || false }}
+  AUTO_DELETE_AFTER_DURATION: ${{ inputs.auto_delete_after_duration != false }}
+  MAX_RUN_DURATION_SECONDS: ${{ inputs.max_run_duration_seconds || '10800' }}
+  ADD_SSH_KEY: ${{ inputs.add_ssh_key != false }}
+  SSH_USER: ${{ inputs.ssh_user || 'runner' }}
+
+jobs:
+  demo-vm:
+    name: ${{ inputs.mode || 'e2e' }} demo VM
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.resolve.outputs.run_id }}
+      instance_name: ${{ steps.capture.outputs.instance_name }}
+      zone: ${{ steps.capture.outputs.zone }}
+      external_ip: ${{ steps.capture.outputs.external_ip }}
+      demo_url: ${{ steps.capture.outputs.demo_url }}
+
+    steps:
+      - name: Resolve inputs
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.mode || 'e2e' }}" in
+            up|smoke|down|e2e) ;;
+            *) echo "Invalid mode: ${{ inputs.mode }}" >&2; exit 2 ;;
+          esac
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "Resolved run id: ${RUN_ID}"
+
+      - name: Checkout demo VM infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: ${{ env.INFRA_REF }}
+          path: demo-vm-infra
+          token: ${{ secrets.infra_repo_token || github.token }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2.1.7
+        with:
+          workload_identity_provider: ${{ inputs.workload_identity_provider || 'projects/370364006392/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
+          service_account: ${{ inputs.service_account || 'github-actions-sa@canaverse.iam.gserviceaccount.com' }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+
+      - name: Prepare SSH public key for VM metadata
+        if: ${{ inputs.add_ssh_key != false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hermes-demo-ssh"
+          SSH_PUBLIC_KEY_PATH="$RUNNER_TEMP/hermes-demo-ssh/id.pub"
+          if [ -n "${{ inputs.public_ssh_key }}" ]; then
+            printf '%s\n' "${{ inputs.public_ssh_key }}" > "$SSH_PUBLIC_KEY_PATH"
+          else
+            ssh-keygen -q -t ed25519 -N '' -C "github-actions-${GITHUB_RUN_ID}" -f "$RUNNER_TEMP/hermes-demo-ssh/id"
+            SSH_PUBLIC_KEY_PATH="$RUNNER_TEMP/hermes-demo-ssh/id.pub"
+          fi
+          echo "SSH_PUBLIC_KEY_PATH=$SSH_PUBLIC_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Initialize OpenTofu backend
+        working-directory: demo-vm-infra
+        shell: bash
+        run: make init
+
+      - name: Provision demo VM
+        if: ${{ inputs.mode == 'up' || inputs.mode == 'e2e' }}
+        working-directory: demo-vm-infra
+        shell: bash
+        run: make demo-up
+
+      - name: Capture VM outputs
+        id: capture
+        if: ${{ inputs.mode == 'up' || inputs.mode == 'e2e' || inputs.mode == 'smoke' }}
+        working-directory: demo-vm-infra/infra/gcp-demo-vm
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "instance_name=$(tofu output -raw instance_name)" >> "$GITHUB_OUTPUT"
+          echo "zone=$(tofu output -raw zone)" >> "$GITHUB_OUTPUT"
+          echo "external_ip=$(tofu output -raw external_ip)" >> "$GITHUB_OUTPUT"
+          echo "demo_url=$(tofu output -raw demo_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test demo VM
+        if: ${{ inputs.mode == 'smoke' || inputs.mode == 'e2e' }}
+        working-directory: demo-vm-infra
+        shell: bash
+        run: make demo-smoke
+
+      - name: Destroy demo VM
+        if: ${{ inputs.mode == 'down' || (inputs.mode == 'e2e' && always()) }}
+        working-directory: demo-vm-infra
+        shell: bash
+        run: make demo-down
