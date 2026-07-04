@@ -1,4 +1,4 @@
-name: Reusable GCP Ephemeral Demo VM
+name: Reusable GCloud Helper
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ on:
         required: false
         default: e2e
       infra_ref:
-        description: "Ref of yevgenisl/gcp-ephemeral-demo-vm to check out."
+        description: "Ref of yevgenisl/gcloud-helper to check out."
         type: string
         required: false
         default: main
@@ -158,7 +158,7 @@ permissions:
   id-token: write
 
 env:
-  INFRA_REPO: yevgenisl/gcp-ephemeral-demo-vm
+  INFRA_REPO: yevgenisl/gcloud-helper
   INFRA_REF: ${{ inputs.infra_ref || 'main' }}
   PROJECT_ID: ${{ inputs.project_id || 'canaverse' }}
   REGION: ${{ inputs.region || 'europe-west1' }}

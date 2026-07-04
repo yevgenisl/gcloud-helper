@@ -1,4 +1,4 @@
-# GCP Ephemeral Demo VM
+# GCloud Helper
 
 OpenTofu + GCE startup bootstrap + Makefile wrapper for creating a disposable GCP demo/CI VM.
 
@@ -146,7 +146,7 @@ permissions:
 
 jobs:
   demo-vm:
-    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
     with:
       mode: e2e
       environment: ci
@@ -190,7 +190,7 @@ Example provision-only flow from a caller repo:
 ```yaml
 jobs:
   demo-up:
-    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
     permissions:
       contents: read
       id-token: write
@@ -208,7 +208,7 @@ jobs:
   demo-down:
     if: always()
     needs: [demo-up, use-demo]
-    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
     permissions:
       contents: read
       id-token: write
@@ -235,7 +235,7 @@ For a repo to call this workflow successfully, the GCP Workload Identity binding
 github-actions-sa@canaverse.iam.gserviceaccount.com
 ```
 
-A manual `workflow_dispatch` from this infra repo is a good syntax test, but it will fail at token refresh unless the WIF binding also allows `yevgenisl/gcp-ephemeral-demo-vm`.
+A manual `workflow_dispatch` from this infra repo is a good syntax test, but it will fail at token refresh unless the WIF binding also allows `yevgenisl/gcloud-helper`.
 
 ## Permission notes
 

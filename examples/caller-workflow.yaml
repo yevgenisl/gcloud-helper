@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   demo-vm-e2e:
-    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
     with:
       mode: e2e
       environment: ci
@@ -22,7 +22,7 @@ jobs:
 #
 # jobs:
 #   demo-up:
-#     uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+#     uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
 #     permissions:
 #       contents: read
 #       id-token: write
@@ -40,7 +40,7 @@ jobs:
 #   demo-down:
 #     if: always()
 #     needs: [demo-up, use-demo]
-#     uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+#     uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
 #     permissions:
 #       contents: read
 #       id-token: write
