@@ -132,6 +132,26 @@ on:
         type: string
         required: false
         default: ""
+      workload_identity_provider:
+        description: "GCP Workload Identity Provider resource name."
+        type: string
+        required: false
+        default: projects/370364006392/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      service_account:
+        description: "GCP service account to impersonate."
+        type: string
+        required: false
+        default: github-actions-sa@canaverse.iam.gserviceaccount.com
+      auto_delete_after_duration:
+        description: "Enable GCP VM auto-delete safety backstop."
+        type: boolean
+        required: false
+        default: true
+      add_ssh_key:
+        description: "Add instance-level SSH public key metadata."
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -146,10 +166,10 @@ env:
   ENVIRONMENT: ${{ inputs.environment || 'ci' }}
   RUN_ID: ${{ inputs.run_id != '' && inputs.run_id || format('gh-{0}', github.run_id) }}
   DEMO_PORT: ${{ inputs.demo_port || '8080' }}
-  CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules || false }}
-  AUTO_DELETE_AFTER_DURATION: ${{ inputs.auto_delete_after_duration != false }}
+  CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules }}
+  AUTO_DELETE_AFTER_DURATION: ${{ inputs.auto_delete_after_duration }}
   MAX_RUN_DURATION_SECONDS: ${{ inputs.max_run_duration_seconds || '10800' }}
-  ADD_SSH_KEY: ${{ inputs.add_ssh_key != false }}
+  ADD_SSH_KEY: ${{ inputs.add_ssh_key }}
   SSH_USER: ${{ inputs.ssh_user || 'runner' }}
 
 jobs:
@@ -199,7 +219,7 @@ jobs:
           tofu_version: latest
 
       - name: Prepare SSH public key for VM metadata
-        if: ${{ inputs.add_ssh_key != false }}
+        if: ${{ inputs.add_ssh_key }}
         shell: bash
         run: |
           set -euo pipefail

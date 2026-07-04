@@ -220,6 +220,17 @@ jobs:
 
 For private cross-repo checkout edge cases, pass a secret named `infra_repo_token` with `contents:read` on this infra repo.
 
+### WIF note
+
+The workflow uses the same auth shape as `canabis-assistant-api/.github/workflows/auth_gcp.yaml`.
+For a repo to call this workflow successfully, the GCP Workload Identity binding must allow that caller repository's OIDC subject to impersonate:
+
+```text
+github-actions-sa@canaverse.iam.gserviceaccount.com
+```
+
+A manual `workflow_dispatch` from this infra repo is a good syntax test, but it will fail at token refresh unless the WIF binding also allows `yevgenisl/gcp-ephemeral-demo-vm`.
+
 ## Permission notes
 
 The Hermes service account has been verified for:
