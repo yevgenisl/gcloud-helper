@@ -43,6 +43,8 @@ CREATE_FIREWALL_RULES=false
 ADD_SSH_KEY=true
 SSH_USER=<local whoami>
 SSH_PUBLIC_KEY_PATH=~/.ssh/id_rsa.pub
+AUTO_DELETE_AFTER_DURATION=true
+MAX_RUN_DURATION_SECONDS=10800 # 3 hours
 ```
 
 State bucket defaults to:
@@ -56,6 +58,37 @@ Override any variable through environment variables, for example:
 ```bash
 ZONE=europe-west1-c RUN_ID=local-test make demo-up
 ```
+
+## Automatic VM deletion safety backstop
+
+By default, the VM is configured with a GCP scheduling limit:
+
+```text
+AUTO_DELETE_AFTER_DURATION=true
+MAX_RUN_DURATION_SECONDS=10800
+```
+
+That means GCP should automatically delete the VM after **3 hours** even if CI/local cleanup fails.
+
+This is only a backstop. Always prefer normal cleanup:
+
+```bash
+make demo-down
+```
+
+Override the lifetime when needed:
+
+```bash
+MAX_RUN_DURATION_SECONDS=21600 make demo-up # 6 hours
+```
+
+Disable the backstop only for debugging:
+
+```bash
+AUTO_DELETE_AFTER_DURATION=false make demo-up
+```
+
+Note: GCP auto-deletes the VM, but OpenTofu-managed companion resources such as firewall rules may remain until `make demo-down` or janitor cleanup runs.
 
 ## SSH key behavior
 

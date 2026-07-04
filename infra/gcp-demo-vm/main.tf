@@ -82,8 +82,17 @@ resource "google_compute_instance" "demo" {
   })
 
   scheduling {
-    automatic_restart   = false
-    on_host_maintenance = "MIGRATE"
-    provisioning_model  = "STANDARD"
+    automatic_restart           = false
+    on_host_maintenance         = "MIGRATE"
+    provisioning_model          = "STANDARD"
+    instance_termination_action = var.auto_delete_after_duration ? "DELETE" : null
+
+    dynamic "max_run_duration" {
+      for_each = var.auto_delete_after_duration ? [1] : []
+      content {
+        seconds = var.max_run_duration_seconds
+        nanos   = 0
+      }
+    }
   }
 }

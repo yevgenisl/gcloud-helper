@@ -15,6 +15,8 @@ CREATE_FIREWALL_RULES="${CREATE_FIREWALL_RULES:-false}"
 ADD_SSH_KEY="${ADD_SSH_KEY:-true}"
 SSH_USER="${SSH_USER:-$(whoami)}"
 SSH_PUBLIC_KEY_PATH="${SSH_PUBLIC_KEY_PATH:-$HOME/.ssh/id_rsa.pub}"
+AUTO_DELETE_AFTER_DURATION="${AUTO_DELETE_AFTER_DURATION:-true}"
+MAX_RUN_DURATION_SECONDS="${MAX_RUN_DURATION_SECONDS:-10800}"
 GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/service-accounts/hermess-sa.json}"
 export GOOGLE_APPLICATION_CREDENTIALS
 
@@ -49,4 +51,6 @@ tofu_vars() {
   printf -- '-var=add_ssh_key=%q ' "$ADD_SSH_KEY"
   printf -- '-var=ssh_user=%q ' "$SSH_USER"
   printf -- '-var=ssh_public_key_path=%q ' "$SSH_PUBLIC_KEY_PATH"
+  printf -- '-var=auto_delete_after_duration=%q ' "$AUTO_DELETE_AFTER_DURATION"
+  printf -- '-var=max_run_duration_seconds=%q ' "$MAX_RUN_DURATION_SECONDS"
 }

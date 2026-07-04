@@ -104,3 +104,15 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
   description = "Local SSH public key path to add to instance metadata by default."
 }
+
+variable "auto_delete_after_duration" {
+  type        = bool
+  default     = true
+  description = "Enable GCP automatic VM deletion after max_run_duration_seconds. This is a safety backstop; normal cleanup should still run tofu destroy."
+}
+
+variable "max_run_duration_seconds" {
+  type        = number
+  default     = 10800
+  description = "Maximum VM runtime before GCP auto-deletes it. Default is 3 hours."
+}
