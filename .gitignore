@@ -1,0 +1,18 @@
+# Local OpenTofu state/cache
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+backend.hcl
+crash.log
+crash.*.log
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

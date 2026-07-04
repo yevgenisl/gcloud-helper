@@ -1,0 +1,91 @@
+#cloud-config
+package_update: true
+packages:
+  - podman
+  - git
+  - curl
+  - jq
+  - python3
+
+write_files:
+  - path: /opt/hermes-demo/health_server.py
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env python3
+      import http.server
+      import json
+      import socketserver
+      import time
+
+      PORT = ${demo_port}
+      BOOT_TIME = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+      class Handler(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path in ('/health', '/ready'):
+                  body = json.dumps({
+                      'status': 'ok',
+                      'service': 'hermes-gcp-demo-vm',
+                      'region': '${region}',
+                      'zone': '${zone}',
+                      'environment': '${environment}',
+                      'run_id': '${run_id}',
+                      'boot_time': BOOT_TIME,
+                  }, indent=2).encode()
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.send_header('Content-Length', str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+                  return
+              body = ("<!doctype html>"
+                      "<html><head><title>Hermes GCP Demo VM</title></head>"
+                      "<body style='font-family: system-ui; background: #020617; color: #e2e8f0; padding: 40px;'>"
+                      "<h1>Hermes GCP Demo VM is running</h1>"
+                      "<p><b>Region:</b> ${region}</p>"
+                      "<p><b>Zone:</b> ${zone}</p>"
+                      "<p><b>Environment:</b> ${environment}</p>"
+                      "<p><b>Run ID:</b> ${run_id}</p>"
+                      "<p><b>Runtime:</b> Fedora/CentOS compatible cloud-init + Podman bootstrap</p>"
+                      "<p><a style='color:#22d3ee' href='/health'>/health</a></p>"
+                      "</body></html>").encode()
+              self.send_response(200)
+              self.send_header('Content-Type', 'text/html; charset=utf-8')
+              self.send_header('Content-Length', str(len(body)))
+              self.end_headers()
+              self.wfile.write(body)
+
+          def log_message(self, fmt, *args):
+              print('%s - - [%s] %s' % (self.address_string(), self.log_date_time_string(), fmt % args), flush=True)
+
+      with socketserver.TCPServer(('0.0.0.0', PORT), Handler) as httpd:
+          print(f'Listening on {PORT}', flush=True)
+          httpd.serve_forever()
+
+  - path: /etc/systemd/system/hermes-demo-health.service
+    permissions: '0644'
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Hermes demo health endpoint
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /opt/hermes-demo/health_server.py
+      Restart=always
+      RestartSec=2
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl enable --now podman.socket || true
+  - systemctl daemon-reload
+  - systemctl enable --now hermes-demo-health.service
+  - curl -fsS http://127.0.0.1:${demo_port}/health | tee /opt/hermes-demo/readiness.json
+  - echo "cloud-init complete" > /opt/hermes-demo/ready
