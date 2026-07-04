@@ -31,20 +31,40 @@ PROJECT_ID="${PROJECT_ID:-canaverse}"
 
 orphan_cleanup() {
   # If a previous apply crashed so badly that state was never written but the
-  # VM was still created, this catches the orphan by name prefix.
-  if command -v gcloud >/dev/null 2>&1; then
-    local found
-    found="$(gcloud compute instances list --project="$PROJECT_ID" \
+  # VM/firewall was still created, this catches the orphans by name prefix.
+  # Best-effort: each resource type is checked independently so one failure
+  # (e.g., insufficient IAM for firewalls) does not block the rest.
+  if ! command -v gcloud >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # 1. Orphan instances.
+  local found
+  found="$(gcloud compute instances list --project="$PROJECT_ID" \
+            --format='value(name)' 2>/dev/null | grep -F "$NAME_PREFIX" || true)"
+  if [ -n "$found" ]; then
+    echo "[tofu-destroy] orphan instance(s) matching $NAME_PREFIX — deleting via gcloud:"
+    printf '%s\n' "$found" | sed 's/^/  - /'
+    while IFS= read -r inst; do
+      [ -z "$inst" ] && continue
+      gcloud compute instances delete "$inst" --zone="$ZONE" \
+        --project="$PROJECT_ID" --quiet 2>&1 | tail -3 | sed 's/^/    /'
+    done <<< "$found"
+  fi
+
+  # 2. Orphan firewalls (created with count = create_firewall_rules ? 1 : 0;
+  #    the prefix is the same as the VM name so the existing grep works).
+  local fw_found
+  fw_found="$(gcloud compute firewall-rules list --project="$PROJECT_ID" \
               --format='value(name)' 2>/dev/null | grep -F "$NAME_PREFIX" || true)"
-    if [ -n "$found" ]; then
-      echo "[tofu-destroy] orphan instance(s) matching $NAME_PREFIX — deleting via gcloud:"
-      printf '%s\n' "$found" | sed 's/^/  - /'
-      while IFS= read -r inst; do
-        [ -z "$inst" ] && continue
-        gcloud compute instances delete "$inst" --zone="$ZONE" \
-          --project="$PROJECT_ID" --quiet 2>&1 | tail -3 | sed 's/^/    /'
-      done <<< "$found"
-    fi
+  if [ -n "$fw_found" ]; then
+    echo "[tofu-destroy] orphan firewall(s) matching $NAME_PREFIX — deleting via gcloud:"
+    printf '%s\n' "$fw_found" | sed 's/^/  - /'
+    while IFS= read -r fw; do
+      [ -z "$fw" ] && continue
+      gcloud compute firewall-rules delete "$fw" --project="$PROJECT_ID" --quiet \
+        2>&1 | tail -3 | sed 's/^/    /'
+    done <<< "$fw_found"
   fi
 }
 
