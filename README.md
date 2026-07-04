@@ -220,6 +220,12 @@ jobs:
 
 For private cross-repo checkout edge cases, pass a secret named `infra_repo_token` with `contents:read` on this infra repo.
 
+A copy-pasteable caller template is also stored at:
+
+```text
+examples/caller-workflow.yaml
+```
+
 ### WIF note
 
 The workflow uses the same auth shape as `canabis-assistant-api/.github/workflows/auth_gcp.yaml`.

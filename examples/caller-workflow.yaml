@@ -1,0 +1,50 @@
+name: GCP demo VM smoke via reusable workflow
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  demo-vm-e2e:
+    uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+    with:
+      mode: e2e
+      environment: ci
+      run_id: ${{ github.event.repository.name }}-${{ github.run_id }}
+      create_firewall_rules: false
+      max_run_duration_seconds: "10800"
+
+# For workflows that need to interact with the public demo URL before cleanup,
+# split the lifecycle into up/use/down jobs:
+#
+# jobs:
+#   demo-up:
+#     uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+#     permissions:
+#       contents: read
+#       id-token: write
+#     with:
+#       mode: up
+#       run_id: ${{ github.event.repository.name }}-${{ github.run_id }}
+#       create_firewall_rules: true
+#
+#   use-demo:
+#     runs-on: ubuntu-latest
+#     needs: demo-up
+#     steps:
+#       - run: curl -fsS "${{ needs.demo-up.outputs.demo_url }}/health"
+#
+#   demo-down:
+#     if: always()
+#     needs: [demo-up, use-demo]
+#     uses: yevgenisl/gcp-ephemeral-demo-vm/.github/workflows/demo-vm.yaml@main
+#     permissions:
+#       contents: read
+#       id-token: write
+#     with:
+#       mode: down
+#       run_id: ${{ github.event.repository.name }}-${{ github.run_id }}
+#       create_firewall_rules: true
