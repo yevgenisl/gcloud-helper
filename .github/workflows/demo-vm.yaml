@@ -108,12 +108,17 @@ on:
         type: string
         required: false
         default: "8080"
+      app_env_file:
+        description: "Path (on the runner) to a file containing KEY=VALUE lines to place beside the app compose file on the VM. Takes precedence over secrets.app_env when both are present. Lets callers render the .env from a secrets source (GSM, Vault, etc.) into a file before invoking this workflow."
+        type: string
+        required: false
+        default: ""
     secrets:
       infra_repo_token:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
         required: false
       app_env:
-        description: "Optional .env file content to place beside the app compose file on the VM. Use only GitHub secrets, never plaintext workflow inputs."
+        description: "Optional .env file content to place beside the app compose file on the VM. Use only GitHub secrets, never plaintext workflow inputs. Ignored if app_env_file is also provided."
         required: false
     outputs:
       run_id:
@@ -328,12 +333,23 @@ jobs:
         shell: bash
         env:
           APP_ENV_CONTENT: ${{ secrets.app_env }}
+          APP_ENV_INPUT_FILE: ${{ inputs.app_env_file }}
         run: |
           set -euo pipefail
-          if [ -n "$APP_ENV_CONTENT" ]; then
+          # Prefer app_env_file (input) so callers can render from GSM/Vault/etc.
+          # Fall back to secrets.app_env for backward compatibility.
+          if [ -n "$APP_ENV_INPUT_FILE" ] && [ -f "$APP_ENV_INPUT_FILE" ]; then
+            cp "$APP_ENV_INPUT_FILE" "$RUNNER_TEMP/app.env"
+            chmod 0600 "$RUNNER_TEMP/app.env"
+            echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
+            echo "Using APP_ENV_FILE from input: $APP_ENV_INPUT_FILE ($(wc -l < "$RUNNER_TEMP/app.env") lines)"
+          elif [ -n "$APP_ENV_CONTENT" ]; then
             printf '%s\n' "$APP_ENV_CONTENT" > "$RUNNER_TEMP/app.env"
             chmod 0600 "$RUNNER_TEMP/app.env"
             echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
+            echo "Using APP_ENV_FILE from secrets.app_env"
+          else
+            echo "No APP_ENV_FILE set; relying on compose to fail-fast on missing required vars."
           fi
 
       - name: Deploy app Docker Compose stack to VM
