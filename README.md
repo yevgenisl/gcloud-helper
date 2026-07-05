@@ -203,10 +203,14 @@ For real non-mock LLM mode, pass a `.env` content to the VM via one of (highest 
 | Path | Type | When to use |
 |---|---|---|
 | `inputs.app_env_file` | string input | Same runner renders the .env (e.g. from a direct prior step output) and passes the path. |
-| `inputs.app_env_artifact_name` | string input | Different job (different runner) renders the .env and uploads it via `actions/upload-artifact@v4`. The reusable workflow downloads the artifact via the actions runtime API. |
+| `inputs.app_env_artifact_name` | string input | Different job (different runner) renders the .env and uploads it via `actions/upload-artifact@v4`. The reusable workflow uses `actions/download-artifact@v4` to pull it. |
 | `secrets.app_env` | secret input | Quick path: paste the full `.env` into a GH repo secret. |
 
 Never put API keys directly into `inputs.*` — they appear in workflow run logs.
+
+### Why not curl + `$ACTIONS_RUNTIME_TOKEN`?
+
+Earlier versions used `curl` with `$ACTIONS_RUNTIME_TOKEN` / `$ACTIONS_RUNTIME_URL` to talk to the Actions runtime API. That works in some patterns (e.g. when the `cache` action consumes them) but **the runner does not inject `ACTIONS_RUNTIME_*` into arbitrary bash scripts** — only into action child processes. Cross-job artifact downloads are now routed through `actions/download-artifact@v4`, which handles auth internally. Don't roll your own with bash.
 
 ### Outputs
 
