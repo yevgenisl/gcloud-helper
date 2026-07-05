@@ -9,7 +9,7 @@ set -euo pipefail
 WF=.github/workflows/demo-vm.yaml
 PYTHON=${PYTHON:-python3}
 
-echo "[1/8] $WF exists and parses; both new inputs declared"
+echo "[1/9] $WF exists and parses; both new inputs declared"
 $PYTHON - "$WF" <<'PY'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
@@ -21,7 +21,7 @@ for k in ('app_env_file', 'app_env_artifact_name'):
 assert 'app_env' in on['secrets'], "secret app_env missing (backward-compat)"
 PY
 
-echo "[2/8] inputs declare string/false/empty"
+echo "[2/9] inputs declare string/false/empty"
 $PYTHON - "$WF" <<'PY'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
@@ -32,7 +32,7 @@ for k in ('app_env_file', 'app_env_artifact_name'):
     assert inp['default'] == ''
 PY
 
-echo "[3/8] secrets.app_env still declared (backward compat)"
+echo "[3/9] secrets.app_env still declared (backward compat)"
 $PYTHON - "$WF" <<'PY'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
@@ -40,7 +40,7 @@ sec = d[True]['workflow_call']['secrets']['app_env']
 assert sec['required'] is False
 PY
 
-echo "[4/8] APP_ENV resolution is now MULTI-STEP (no monolithic bash using ACTIONS_RUNTIME_TOKEN)"
+echo "[4/9] APP_ENV resolution is now MULTI-STEP (no monolithic bash using ACTIONS_RUNTIME_TOKEN)"
 # A monolithic step that does the artifact download itself is what bit us in
 # lolian/superapp#28752851868 -- the runner doesn't inject ACTIONS_RUNTIME_*
 # into arbitrary bash, so the curl+unzip pattern failed with
@@ -63,7 +63,7 @@ grep -nF '      - name: Fetch app env (secrets.app_env fallback)' "$WF" >/dev/nu
 grep -nF '      - name: Export APP_ENV_FILE for downstream steps' "$WF" >/dev/null \
   || { echo "Expected: Export APP_ENV_FILE step present"; exit 1; }
 
-echo "[5/8] artifact fetcher uses actions/download-artifact@v4 (no bash+curl+ACTIONS_RUNTIME_TOKEN)"
+echo "[5/9] artifact fetcher uses actions/download-artifact@v4 (no bash+curl+ACTIONS_RUNTIME_TOKEN)"
 # This is the actual regression fix: the artifact step must be a `uses:`,
 # not bash referencing ACTIONS_RUNTIME_TOKEN/URL.
 $PYTHON - "$WF" <<'PY'
@@ -80,7 +80,7 @@ assert uses.startswith('actions/download-artifact'), \
     f"artifact step should use actions/download-artifact, got {uses!r}"
 PY
 
-echo "[6/8] no \$ACTIONS_RUNTIME_TOKEN references in any bash run block"
+echo "[6/9] no \$ACTIONS_RUNTIME_TOKEN references in any bash run block"
 # Even one reference can break the env vars are not injected.
 $PYTHON - "$WF" <<'PY'
 import sys, yaml
@@ -99,14 +99,55 @@ if violations:
     )
 PY
 
-echo "[7/8] precedence docs still note app_env_file > app_env_artifact_name > secrets.app_env"
+echo "[7/9] precedence docs still note app_env_file > app_env_artifact_name > secrets.app_env"
 grep -nE 'app_env_file.*>.*app_env_artifact_name.*>.*secrets.app_env' "$WF" >/dev/null \
   || { echo "precedence order not documented at top of resolve step"; exit 1; }
 
-echo "[8/8] actions/download-artifact@v4 declared in inputs/outputs (so superapp can pin SHA)"
+echo "[8/9] actions/download-artifact@v4 declared in inputs/outputs (so superapp can pin SHA)"
 # The composite action caller passes a name ref; we use the action by version
 # which is fine for now.
 grep -nF 'actions/download-artifact@v4' "$WF" >/dev/null \
   || { echo "expected exact @v4 download-artifact reference"; exit 1; }
+
+echo "[9/9] every \$GITHUB_OUTPUT write is a single key=value (one echo per output)"
+# GitHub Actions parses each line in $GITHUB_OUTPUT as one key=value pair.
+# A line like `echo "source=artifact name=$X"` is parsed as
+# `source`="artifact name=$X" -- the trailing "name=$X" is part of the value,
+# not a separate output. The `steps.<id>.outputs.name` then comes back as
+# empty, the artifact fetch step's `if` never matches 'artifact', all fetch
+# steps get skipped silently, the env file is never written, and the deploy
+# step explodes with the original
+# `RuntimeError: JWT_SECRET must be set` because the substitution fails.
+#
+# Regression: lolian/superapp#28753259094
+$PYTHON - "$WF" <<'PY'
+import sys, yaml, re
+d = yaml.safe_load(open(sys.argv[1]))
+for step in d['jobs']['demo-vm']['steps']:
+    run = step.get('run') or ''
+    if not run or '>> "$GITHUB_OUTPUT"' not in run:
+        continue
+    # Find each line that writes to $GITHUB_OUTPUT and ensure it has exactly
+    # one `key=value` shape (no second space-then-key on the same line).
+    for line in run.splitlines():
+        if '>> "$GITHUB_OUTPUT"' not in line:
+            continue
+        # Strip the leading `echo "..."` wrapper to inspect just the value.
+        m = re.search(r'echo\s+"([^"]*)"', line)
+        if not m:
+            continue
+        payload = m.group(1)
+        # Count top-level "key=" tokens separated by " key=" (allowing = in values).
+        # We require that after stripping any whitespace, there's no second " k=" pair
+        # at the start of a token boundary.
+        # Simple, robust check: forbid space-separated "key=" patterns after the first.
+        tokens = re.findall(r'(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=', payload)
+        if len(tokens) > 1:
+            raise SystemExit(
+                f"step {step.get('name')!r} writes multiple outputs on one $GITHUB_OUTPUT line: "
+                f"{payload!r}. GitHub parses one key=value per line. Use one echo per output. "
+                "(Regression: lolian/superapp#28753259094)"
+            )
+PY
 
 echo "OK — demo-vm.yaml multi-path .env contract intact; uses actions/download-artifact@v4 for cross-job artifacts"
