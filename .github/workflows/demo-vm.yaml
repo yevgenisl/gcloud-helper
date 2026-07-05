@@ -333,67 +333,112 @@ jobs:
           echo "external_ip=$(tofu output -raw external_ip)" >> "$GITHUB_OUTPUT"
           echo "demo_url=$(tofu output -raw demo_url)" >> "$GITHUB_OUTPUT"
 
-      - name: Download or read optional app env file
-        id: fetch_env
+      # Resolve APP_ENV in three possible paths. The order is highest-precedence first:
+      #   app_env_file > app_env_artifact_name > secrets.app_env > nothing (deploy fails
+      #   fast on missing required vars). Each path is its own step so the runner injects
+      #   ACTIONS_RUNTIME_TOKEN/URL into the download-artifact action's child process where
+      #   it's actually used (NOT in arbitrary bash, which previously failed because
+      #   the env vars weren't injected there).
+
+      - name: Resolve app env file path (input_file priority)
+        id: env_path
         if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
         shell: bash
         env:
-          APP_ENV_CONTENT: ${{ secrets.app_env }}
           APP_ENV_INPUT_FILE: ${{ inputs.app_env_file }}
           APP_ENV_ARTIFACT_NAME: ${{ inputs.app_env_artifact_name }}
         run: |
           set -euo pipefail
-          # Precedence: app_env_file > app_env_artifact_name > secrets.app_env > nothing
-          if [ -n "$APP_ENV_INPUT_FILE" ] && [ -f "$APP_ENV_INPUT_FILE" ]; then
-            cp "$APP_ENV_INPUT_FILE" "$RUNNER_TEMP/app.env"
+          # Decide which source to use. The actual fetch happens in the next step
+          # (because for the artifact path we need a `uses:` action, which can't
+          # be selected by bash branching).
+          if [ -n "$APP_ENV_INPUT_FILE" ]; then
             echo "source=input_file path=$APP_ENV_INPUT_FILE" >> "$GITHUB_OUTPUT"
+            echo "fetch=true" >> "$GITHUB_OUTPUT"
           elif [ -n "$APP_ENV_ARTIFACT_NAME" ]; then
-            echo "Downloading artifact $APP_ENV_ARTIFACT_NAME"
-            # Use the runner runtime API rather than actions/download-artifact
-            # so we don't need an extra action install step on this runner.
-            ART_JSON="$(curl -sSL \
-              -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
-              "$ACTIONS_RUNTIME_URL/artifact/runs/$GITHUB_RUN_ID/artifact?name=$APP_ENV_ARTIFACT_NAME")"
-            ART_ID="$(printf '%s' "$ART_JSON" | sed -n 's/.*"databaseId":\([0-9]*\).*/\1/p' | head -n1)"
-            if [ -z "$ART_ID" ]; then
-              echo "::error::Artifact '$APP_ENV_ARTIFACT_NAME' not found in run $GITHUB_RUN_ID"
-              exit 1
-            fi
-            ZIP_PATH="$RUNNER_TEMP/app-env-artifact.zip"
-            curl -sSL -o "$ZIP_PATH" \
-              -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
-              "$ACTIONS_RUNTIME_URL/artifact/runs/$GITHUB_RUN_ID/artifacts/$ART_ID/zip"
-            EXTRACT_DIR="$RUNNER_TEMP/app-env-artifact-extracted"
-            rm -rf "$EXTRACT_DIR" "$RUNNER_TEMP/app.env"
-            mkdir -p "$EXTRACT_DIR"
-            # unzip into a deterministic dir, then walk to find the .env
-            ( cd "$EXTRACT_DIR" && unzip -o -qq "$ZIP_PATH" )
-            FOUND="$(find "$EXTRACT_DIR" -type f -name '*.env' | head -n1)"
-            if [ -z "$FOUND" ]; then
-              FOUND="$(find "$EXTRACT_DIR" -type f | head -n1)"
-            fi
-            if [ -z "$FOUND" ]; then
-              echo "::error::Artifact '$APP_ENV_ARTIFACT_NAME' zip contained no file at $EXTRACT_DIR"
-              exit 1
-            fi
-            mv "$FOUND" "$RUNNER_TEMP/app.env"
-            rm -f "$ZIP_PATH"
             echo "source=artifact name=$APP_ENV_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
-          elif [ -n "$APP_ENV_CONTENT" ]; then
-            printf '%s\n' "$APP_ENV_CONTENT" > "$RUNNER_TEMP/app.env"
-            echo "source=secrets.app_env" >> "$GITHUB_OUTPUT"
+            echo "fetch=true" >> "$GITHUB_OUTPUT"
           else
+            echo "source=none" >> "$GITHUB_OUTPUT"
+            echo "fetch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch app env (file input)
+        if: ${{ steps.env_path.outputs.source == 'input_file' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="${{ steps.env_path.outputs.path }}"
+          if [ ! -f "$src" ]; then
+            echo "::error::app_env_file input points at non-existent path: $src"
+            exit 1
+          fi
+          install -m 0600 "$src" "$RUNNER_TEMP/app.env"
+          echo "Read app_env_file: $src ($(wc -l < "$RUNNER_TEMP/app.env") lines)"
+
+      - name: Fetch app env (artifact)
+        # `actions/download-artifact` is the canonical way to read cross-job
+        # artifacts. It handles ACTIONS_RUNTIME_TOKEN/URL internally. Don't
+        # try to do this with curl + bash + those env vars -- they are not
+        # guaranteed to be injected into bash processes. (Regression:
+        # lolian/superapp#28752851868)
+        if: ${{ steps.env_path.outputs.source == 'artifact' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.env_path.outputs.name }}
+          path: ${{ runner.temp }}/app-env-artifact
+          # GITHUB_TOKEN is auto-injected by the action; we don't need to declare it.
+
+      - name: Fetch app env (secrets.app_env fallback)
+        if: ${{ steps.env_path.outputs.source == 'none' }}
+        shell: bash
+        env:
+          APP_ENV_CONTENT: ${{ secrets.app_env }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_ENV_CONTENT" ]; then
             echo "No APP_ENV_FILE set; relying on compose to fail-fast on missing required vars."
             exit 0
           fi
+          printf '%s\n' "$APP_ENV_CONTENT" > "$RUNNER_TEMP/app.env"
           chmod 0600 "$RUNNER_TEMP/app.env"
-          if [ ! -s "$RUNNER_TEMP/app.env" ]; then
-            echo "::error::APP_ENV file is empty after fetch"
+
+      - name: Normalize downloaded artifact to $RUNNER_TEMP/app.env
+        # When the source is `artifact`, download-artifact@v4 dumps the contents
+        # into a directory. Walk that directory to find the .env file, and
+        # rename it to the canonical $RUNNER_TEMP/app.env path that the
+        # deploy-compose script expects.
+        if: ${{ steps.env_path.outputs.source == 'artifact' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTRACT_DIR="$RUNNER_TEMP/app-env-artifact"
+          if [ ! -d "$EXTRACT_DIR" ]; then
+            echo "::error::Artifact download failed: $EXTRACT_DIR does not exist"
             exit 1
           fi
+          FOUND="$(find "$EXTRACT_DIR" -type f -name '*.env' | head -n1)"
+          if [ -z "$FOUND" ]; then
+            FOUND="$(find "$EXTRACT_DIR" -type f | head -n1)"
+          fi
+          if [ -z "$FOUND" ]; then
+            echo "::error::Artifact ${{ steps.env_path.outputs.name }} contained no file"
+            exit 1
+          fi
+          install -m 0600 "$FOUND" "$RUNNER_TEMP/app.env"
+          echo "Normalized artifact env: $FOUND -> $RUNNER_TEMP/app.env ($(wc -l < "$RUNNER_TEMP/app.env") lines)"
+
+      - name: Export APP_ENV_FILE for downstream steps
+        if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RUNNER_TEMP/app.env" ]; then
+            # Nothing to export; downstream deploy will rely on compose's fail-fast.
+            echo "No APP_ENV_FILE produced by any source."
+            exit 0
+          fi
           echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
-          echo "Selected env source: $(grep -E '^source=' <<<"$(cat "$GITHUB_OUTPUT" 2>/dev/null || true)")"
-          echo "App env file size: $(wc -l < "$RUNNER_TEMP/app.env") lines"
 
       - name: Deploy app Docker Compose stack to VM
         if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
