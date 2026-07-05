@@ -109,7 +109,12 @@ on:
         required: false
         default: "8080"
       app_env_file:
-        description: "Path (on the runner) to a file containing KEY=VALUE lines to place beside the app compose file on the VM. Takes precedence over secrets.app_env when both are present. Lets callers render the .env from a secrets source (GSM, Vault, etc.) into a file before invoking this workflow."
+        description: "Path (on the runner) to a file containing KEY=VALUE lines to place beside the app compose file on the VM. Use when the same job renders the .env (e.g. workflow_call expansion of a previous step's output). Takes precedence over app_env_artifact_name and secrets.app_env when set."
+        type: string
+        required: false
+        default: ""
+      app_env_artifact_name:
+        description: "Name of a GitHub Actions artifact (uploaded earlier in the same workflow run by a caller job via actions/upload-artifact@v4) whose body is the .env file. Use when the .env is rendered on a separate runner (e.g. cross-job). The artifact's single file is downloaded to the runner before deploy. Takes precedence over secrets.app_env; ignored if app_env_file is also set."
         type: string
         required: false
         default: ""
@@ -118,7 +123,7 @@ on:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
         required: false
       app_env:
-        description: "Optional .env file content to place beside the app compose file on the VM. Use only GitHub secrets, never plaintext workflow inputs. Ignored if app_env_file is also provided."
+        description: "Optional .env file content to place beside the app compose file on the VM. Use only GitHub secrets, never plaintext workflow inputs. Lowest precedence; ignored if app_env_file or app_env_artifact_name is also provided."
         required: false
     outputs:
       run_id:
@@ -328,29 +333,67 @@ jobs:
           echo "external_ip=$(tofu output -raw external_ip)" >> "$GITHUB_OUTPUT"
           echo "demo_url=$(tofu output -raw demo_url)" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare optional app env file
+      - name: Download or read optional app env file
+        id: fetch_env
         if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
         shell: bash
         env:
           APP_ENV_CONTENT: ${{ secrets.app_env }}
           APP_ENV_INPUT_FILE: ${{ inputs.app_env_file }}
+          APP_ENV_ARTIFACT_NAME: ${{ inputs.app_env_artifact_name }}
         run: |
           set -euo pipefail
-          # Prefer app_env_file (input) so callers can render from GSM/Vault/etc.
-          # Fall back to secrets.app_env for backward compatibility.
+          # Precedence: app_env_file > app_env_artifact_name > secrets.app_env > nothing
           if [ -n "$APP_ENV_INPUT_FILE" ] && [ -f "$APP_ENV_INPUT_FILE" ]; then
             cp "$APP_ENV_INPUT_FILE" "$RUNNER_TEMP/app.env"
-            chmod 0600 "$RUNNER_TEMP/app.env"
-            echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
-            echo "Using APP_ENV_FILE from input: $APP_ENV_INPUT_FILE ($(wc -l < "$RUNNER_TEMP/app.env") lines)"
+            echo "source=input_file path=$APP_ENV_INPUT_FILE" >> "$GITHUB_OUTPUT"
+          elif [ -n "$APP_ENV_ARTIFACT_NAME" ]; then
+            echo "Downloading artifact $APP_ENV_ARTIFACT_NAME"
+            # Use the runner runtime API rather than actions/download-artifact
+            # so we don't need an extra action install step on this runner.
+            ART_JSON="$(curl -sSL \
+              -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+              "$ACTIONS_RUNTIME_URL/artifact/runs/$GITHUB_RUN_ID/artifact?name=$APP_ENV_ARTIFACT_NAME")"
+            ART_ID="$(printf '%s' "$ART_JSON" | sed -n 's/.*"databaseId":\([0-9]*\).*/\1/p' | head -n1)"
+            if [ -z "$ART_ID" ]; then
+              echo "::error::Artifact '$APP_ENV_ARTIFACT_NAME' not found in run $GITHUB_RUN_ID"
+              exit 1
+            fi
+            ZIP_PATH="$RUNNER_TEMP/app-env-artifact.zip"
+            curl -sSL -o "$ZIP_PATH" \
+              -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+              "$ACTIONS_RUNTIME_URL/artifact/runs/$GITHUB_RUN_ID/artifacts/$ART_ID/zip"
+            EXTRACT_DIR="$RUNNER_TEMP/app-env-artifact-extracted"
+            rm -rf "$EXTRACT_DIR" "$RUNNER_TEMP/app.env"
+            mkdir -p "$EXTRACT_DIR"
+            # unzip into a deterministic dir, then walk to find the .env
+            ( cd "$EXTRACT_DIR" && unzip -o -qq "$ZIP_PATH" )
+            FOUND="$(find "$EXTRACT_DIR" -type f -name '*.env' | head -n1)"
+            if [ -z "$FOUND" ]; then
+              FOUND="$(find "$EXTRACT_DIR" -type f | head -n1)"
+            fi
+            if [ -z "$FOUND" ]; then
+              echo "::error::Artifact '$APP_ENV_ARTIFACT_NAME' zip contained no file at $EXTRACT_DIR"
+              exit 1
+            fi
+            mv "$FOUND" "$RUNNER_TEMP/app.env"
+            rm -f "$ZIP_PATH"
+            echo "source=artifact name=$APP_ENV_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           elif [ -n "$APP_ENV_CONTENT" ]; then
             printf '%s\n' "$APP_ENV_CONTENT" > "$RUNNER_TEMP/app.env"
-            chmod 0600 "$RUNNER_TEMP/app.env"
-            echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
-            echo "Using APP_ENV_FILE from secrets.app_env"
+            echo "source=secrets.app_env" >> "$GITHUB_OUTPUT"
           else
             echo "No APP_ENV_FILE set; relying on compose to fail-fast on missing required vars."
+            exit 0
           fi
+          chmod 0600 "$RUNNER_TEMP/app.env"
+          if [ ! -s "$RUNNER_TEMP/app.env" ]; then
+            echo "::error::APP_ENV file is empty after fetch"
+            exit 1
+          fi
+          echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
+          echo "Selected env source: $(grep -E '^source=' <<<"$(cat "$GITHUB_OUTPUT" 2>/dev/null || true)")"
+          echo "App env file size: $(wc -l < "$RUNNER_TEMP/app.env") lines"
 
       - name: Deploy app Docker Compose stack to VM
         if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
