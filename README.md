@@ -208,6 +208,25 @@ For real non-mock LLM mode, pass a `.env` content to the VM via one of (highest 
 
 Never put API keys directly into `inputs.*` — they appear in workflow run logs.
 
+### Private Artifact Registry pulls
+
+If your `docker-compose.yml` references images in a **private** Artifact Registry, the VM's podman needs GAR auth at `docker compose up` time. Set:
+
+```yaml
+app_gar_registry: europe-west2-docker.pkg.dev     # or your GAR hostname
+# app_gar_registry_host: https://europe-west2-docker.pkg.dev  # auto-derived from above
+```
+
+The workflow:
+
+1. Calls `gcloud auth print-access-token` (the WIF-established identity has GAR read via `roles/artifactregistry.writer`, which implies reader).
+2. Saves the token to `$RUNNER_TEMP/gar-token.json` and scp's it to the VM.
+3. On the VM, the deploy script pipes it into `podman login -u oauth2accesstoken --password-stdin`, deletes the file, then runs `podman compose up`.
+
+The token is **1-hour validity** and contains no service-account key on disk. The VM never sees the SA credentials.
+
+To skip GAR auth (e.g. when your compose file pulls only from docker.io), set `app_gar_registry: ''`. The auth block is then skipped; the workflow's "Mint GAR" step also doesn't run.
+
 ### Why not curl + `$ACTIONS_RUNTIME_TOKEN`?
 
 Earlier versions used `curl` with `$ACTIONS_RUNTIME_TOKEN` / `$ACTIONS_RUNTIME_URL` to talk to the Actions runtime API. That works in some patterns (e.g. when the `cache` action consumes them) but **the runner does not inject `ACTIONS_RUNTIME_*` into arbitrary bash scripts** — only into action child processes. Cross-job artifact downloads are now routed through `actions/download-artifact@v4`, which handles auth internally. Don't roll your own with bash.

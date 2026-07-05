@@ -8,6 +8,9 @@ APP_SOURCE_DIR="${APP_SOURCE_DIR:?APP_SOURCE_DIR is required}"
 APP_NAME="${APP_NAME:-app}"
 APP_PORT="${APP_PORT:-$DEMO_PORT}"
 APP_ENV_FILE="${APP_ENV_FILE:-}"
+GAR_TOKEN_FILE="${GAR_TOKEN_FILE:-}"
+GAR_REGISTRY="${GAR_REGISTRY:-}"
+GAR_REGISTRY_HOST="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY:-}}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/${APP_NAME}}"
 
 cd "$TF_DIR"
@@ -17,6 +20,7 @@ ARCHIVE="$(mktemp -t "${APP_NAME}.XXXXXX.tar.gz")"
 REMOTE_ARCHIVE="/tmp/${APP_NAME}.tar.gz"
 REMOTE_SCRIPT="/tmp/${APP_NAME}-deploy.sh"
 REMOTE_ENV="/tmp/${APP_NAME}.env"
+REMOTE_GAR_TOKEN="/tmp/${APP_NAME}.gar-token"
 
 cleanup() {
   rm -f "$ARCHIVE"
@@ -41,6 +45,17 @@ else
   REMOTE_ENV=""
 fi
 
+# Scp the short-lived GAR OAuth token (1-hr validity) to the VM if the
+# caller provided one. The token is later consumed by the remote
+# deploy script to run `podman login -u oauth2accesstoken --password-stdin`.
+# We never log the contents; only the existence.
+if [ -n "$GAR_TOKEN_FILE" ] && [ -f "$GAR_TOKEN_FILE" ]; then
+  echo "Uploading GAR auth token (1 h validity, $(wc -c < "$GAR_TOKEN_FILE") bytes)"
+  gcloud compute scp "$GAR_TOKEN_FILE" "$NAME:$REMOTE_GAR_TOKEN" --zone "$ZONE_OUT" --project "$PROJECT_ID" --quiet
+else
+  REMOTE_GAR_TOKEN=""
+fi
+
 DEPLOY_SCRIPT_LOCAL="$(mktemp -t "${APP_NAME}.deploy.XXXXXX.sh")"
 cat > "$DEPLOY_SCRIPT_LOCAL" <<'REMOTE'
 #!/usr/bin/env bash
@@ -51,6 +66,9 @@ APP_PORT="__APP_PORT__"
 REMOTE_APP_DIR="__REMOTE_APP_DIR__"
 REMOTE_ARCHIVE="__REMOTE_ARCHIVE__"
 REMOTE_ENV="__REMOTE_ENV__"
+REMOTE_GAR_TOKEN="__REMOTE_GAR_TOKEN__"
+GAR_REGISTRY="__GAR_REGISTRY__"
+GAR_REGISTRY_HOST="__GAR_REGISTRY_HOST__"
 
 if command -v dnf >/dev/null 2>&1; then
   # Avoid racing the GCE metadata startup script's own dnf transaction.
@@ -117,6 +135,7 @@ cd "$REMOTE_APP_DIR"
 
 if [ -n "$REMOTE_ENV" ] && [ -f "$REMOTE_ENV" ]; then
   install -m 0600 "$REMOTE_ENV" .env
+  echo "Mounted .env from $REMOTE_ENV (0600)"
 else
   cat > .env <<ENV
 HOST_BIND_IP=0.0.0.0
@@ -133,6 +152,37 @@ ENV
   chmod 0600 .env
 fi
 
+# ── Authenticate podman against the private GAR ─────────────────────────────
+# Compose services reference images like:
+#   ${REGISTRY:-europe-west2-docker.pkg.dev/canaverse/canabis-superapp}/api:latest
+# Those images are in a private Artifact Registry repository. The calling
+# workflow has already minted a short-lived OAuth token and scp'd it to
+# $REMOTE_GAR_TOKEN; we pipe it into `podman login` here, then delete
+# the file.
+#
+# If $GAR_REGISTRY is empty (compose file uses only docker.io), the
+# entire GAR auth block is skipped.
+if [ -n "${GAR_REGISTRY:-}" ] && [ -n "${REMOTE_GAR_TOKEN:-}" ] && [ -f "$REMOTE_GAR_TOKEN" ]; then
+  echo "Authenticating podman against private GAR $GAR_REGISTRY_HOST"
+  # podman stores its auth in /run/containers/0/auth.json (rootful) or
+  # $XDG_RUNTIME_DIR/containers/auth.json (rootless). Fedora VMs use
+  # rootful podman by default here.
+  if ! cat "$REMOTE_GAR_TOKEN" | podman login -u oauth2accesstoken --password-stdin "${GAR_REGISTRY_HOST}"; then
+    echo "::error::podman login failed for ${GAR_REGISTRY_HOST}" >&2
+    exit 1
+  fi
+  rm -f "$REMOTE_GAR_TOKEN"
+  # Verify auth landed by listing the registry (no-op when used; just
+  # surfaces auth errors early).
+  podman pull --quiet "${GAR_REGISTRY_HOST}/__nonexistent-image-name" >/dev/null 2>&1 || true
+elif [ -n "${GAR_REGISTRY:-}" ]; then
+  # Caller passed app_gar_registry but no GAR_TOKEN_FILE → can't pull
+  # private images. Fail loudly rather than let podman emit a
+  # confusing auth error at first image pull.
+  echo "::error::GAR_REGISTRY=${GAR_REGISTRY} but no GAR token file was scp'd; set app_gar_registry='' to skip GAR auth." >&2
+  exit 1
+fi
+
 if podman compose version >/dev/null 2>&1; then
   COMPOSE=(podman compose)
 elif command -v podman-compose >/dev/null 2>&1; then
@@ -145,7 +195,12 @@ else
 fi
 
 "${COMPOSE[@]}" config >/tmp/${APP_NAME}-compose-config.txt
-"${COMPOSE[@]}" up -d --build
+# Compose is image-only. We explicitly do NOT pass --build: any
+# `build:` directive in the compose file is treated as a misconfiguration
+# and would cause a network + time hit we don't need. All images come
+# from Artifact Registry (authenticated above) or docker.io (already
+# public). Regression: lolian/superapp — image-only deploy refactor.
+"${COMPOSE[@]}" up -d
 "${COMPOSE[@]}" ps
 
 for i in $(seq 1 60); do
@@ -163,20 +218,31 @@ echo "${APP_NAME} compose deployment failed health check" >&2
 exit 1
 REMOTE
 
-python3 - "$DEPLOY_SCRIPT_LOCAL" "$APP_NAME" "$APP_PORT" "$REMOTE_APP_DIR" "$REMOTE_ARCHIVE" "$REMOTE_ENV" <<'PY'
-from pathlib import Path
+python3 - "$DEPLOY_SCRIPT_LOCAL" \
+  "$APP_NAME" \
+  "$APP_PORT" \
+  "$REMOTE_APP_DIR" \
+  "$REMOTE_ARCHIVE" \
+  "$REMOTE_ENV" \
+  "$REMOTE_GAR_TOKEN" \
+  "${GAR_REGISTRY:-europe-west2-docker.pkg.dev}" \
+  "${GAR_REGISTRY_HOST:-https://europe-west2-docker.pkg.dev}" <<'PY'
 import sys
-p=Path(sys.argv[1])
-s=p.read_text()
-repls={
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+repls = {
     '__APP_NAME__': sys.argv[2],
     '__APP_PORT__': sys.argv[3],
     '__REMOTE_APP_DIR__': sys.argv[4],
     '__REMOTE_ARCHIVE__': sys.argv[5],
     '__REMOTE_ENV__': sys.argv[6],
+    '__REMOTE_GAR_TOKEN__': sys.argv[7],
+    '__GAR_REGISTRY__': sys.argv[8],
+    '__GAR_REGISTRY_HOST__': sys.argv[9],
 }
-for k,v in repls.items():
-    s=s.replace(k, v)
+for k, v in repls.items():
+    s = s.replace(k, v)
 p.write_text(s)
 PY
 chmod +x "$DEPLOY_SCRIPT_LOCAL"
