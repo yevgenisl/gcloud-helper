@@ -69,6 +69,30 @@ elif command -v yum >/dev/null 2>&1; then
 fi
 
 systemctl enable --now podman.socket || true
+
+# Podman 5.x on Fedora 43 has `unqualified-search-registries` enforcement on
+# by default: when a Compose service references a short-name image (e.g.
+# `postgres:16-alpine` or `redis:7-alpine`), podman prompts the user to
+# disambiguate the registry. In a non-TTY CI environment the prompt can't
+# be shown, so the pull fails with:
+#
+#   Error: short-name resolution enforced but cannot prompt without a TTY
+#
+# which then cascades into:
+#
+#   Error: "<service>" is not a valid container, cannot be used as a
+#   dependency: no container with name or ID "<service>" found
+#
+# for every depends_on. Fix: pre-register `docker.io` as the unqualified
+# search list so any unprefixed short name resolves to
+# `docker.io/library/<image>` automatically.
+#
+# Regression: lolian/superapp#28753529610
+mkdir -p /etc/containers/registries.conf.d
+cat > /etc/containers/registries.conf.d/zz-unqualified-search.conf <<'EOF'
+unqualified-search-registries = ["docker.io"]
+EOF
+
 systemctl stop hermes-demo-health.service 2>/dev/null || true
 systemctl kill --kill-who=all hermes-demo-health.service 2>/dev/null || true
 systemctl disable hermes-demo-health.service 2>/dev/null || true
