@@ -349,17 +349,29 @@ jobs:
           APP_ENV_ARTIFACT_NAME: ${{ inputs.app_env_artifact_name }}
         run: |
           set -euo pipefail
-          # Decide which source to use. The actual fetch happens in the next step
-          # (because for the artifact path we need a `uses:` action, which can't
-          # be selected by bash branching).
+          # Decide which source to use. Each output MUST be on its own line --
+          # one `echo "k=v"` per line. The first 'if' branch had been
+          # writing "source=artifact name=app-env-file" as a SINGLE line,
+          # which GitHub parsed as `source`="artifact name=app-env-file"
+          # (the rest of the line becomes the value), and the
+          # `steps.env_path.outputs.source == 'artifact'` equality check
+          # silently evaluated to false. The Fetch steps then all skipped,
+          # the env file was never written, and podman-compose bailed
+          # at substitution time -- the original
+          # "JWT_SECRET must be set" failure mode in disguise.
+          #
+          # Regression: lolian/superapp#28753259094
           if [ -n "$APP_ENV_INPUT_FILE" ]; then
-            echo "source=input_file path=$APP_ENV_INPUT_FILE" >> "$GITHUB_OUTPUT"
+            echo "source=input_file" >> "$GITHUB_OUTPUT"
+            echo "name=$APP_ENV_INPUT_FILE" >> "$GITHUB_OUTPUT"
             echo "fetch=true" >> "$GITHUB_OUTPUT"
           elif [ -n "$APP_ENV_ARTIFACT_NAME" ]; then
-            echo "source=artifact name=$APP_ENV_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+            echo "source=artifact" >> "$GITHUB_OUTPUT"
+            echo "name=$APP_ENV_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
             echo "fetch=true" >> "$GITHUB_OUTPUT"
           else
             echo "source=none" >> "$GITHUB_OUTPUT"
+            echo "name=" >> "$GITHUB_OUTPUT"
             echo "fetch=false" >> "$GITHUB_OUTPUT"
           fi
 
