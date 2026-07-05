@@ -198,7 +198,15 @@ Deployment behavior:
 6. runs `podman compose` / `podman-compose` with `postgres api`;
 7. verifies `http://127.0.0.1:<app_port>/health` from inside the VM.
 
-For real non-mock LLM mode, pass a workflow secret named `app_env` containing the desired `.env` content. Do not put API keys in workflow inputs.
+For real non-mock LLM mode, pass a `.env` content to the VM via one of (highest precedence first):
+
+| Path | Type | When to use |
+|---|---|---|
+| `inputs.app_env_file` | string input | Same runner renders the .env (e.g. from a direct prior step output) and passes the path. |
+| `inputs.app_env_artifact_name` | string input | Different job (different runner) renders the .env and uploads it via `actions/upload-artifact@v4`. The reusable workflow downloads the artifact via the actions runtime API. |
+| `secrets.app_env` | secret input | Quick path: paste the full `.env` into a GH repo secret. |
+
+Never put API keys directly into `inputs.*` — they appear in workflow run logs.
 
 ### Outputs
 
