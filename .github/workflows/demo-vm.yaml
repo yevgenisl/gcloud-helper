@@ -143,6 +143,11 @@ on:
         type: string
         required: false
         default: ""
+      app_post_deploy_script:
+        description: "Path (on the runner) to a bash script that runs on the VM after `podman compose up -d` succeeds. Use this for app-specific bootstrap steps the generic gcloud-helper deployer shouldn't know about (e.g. applying a database schema, warming caches, running extra health checks). The script is invoked with `bash <path>` and inherits the same env vars as the main remote deploy script."
+        type: string
+        required: false
+        default: ""
     secrets:
       infra_repo_token:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
@@ -572,6 +577,7 @@ jobs:
           COMPOSE_SUBDIR="${{ inputs.app_compose_subdir }}" \
           APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
           APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
+          APP_POST_DEPLOY_SCRIPT="${{ inputs.app_post_deploy_script }}" \
           make deploy-compose
 
       - name: Smoke test demo VM
