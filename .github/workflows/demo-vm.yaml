@@ -118,6 +118,31 @@ on:
         type: string
         required: false
         default: ""
+      app_gar_registry:
+        description: "Hostname of the private container registry to authenticate podman against before compose up (e.g. europe-west2-docker.pkg.dev). Leave empty if the compose file pulls only from docker.io."
+        type: string
+        required: false
+        default: "europe-west2-docker.pkg.dev"
+      app_gar_registry_host:
+        description: "Full registry URL podman will log into. Usually https:// followed by app_gar_registry. Override only if your podman client requires a non-standard URL."
+        type: string
+        required: false
+        default: ""
+      app_compose_subdir:
+        description: "Path inside the checked-out app repo that contains docker-compose.yml. Set to `deployment` for repos like lolian/superapp where compose lives under deployment/, or leave empty for repos where compose is at the repo root."
+        type: string
+        required: false
+        default: ""
+      app_image_tag:
+        description: "Image tag baked into the rendered .env as API_TAG/WEB_TAG/ASSISTANT_TAG. Defaults to `latest`. Override to pin a specific build (e.g. `sha-abc1234`)."
+        type: string
+        required: false
+        default: "latest"
+      app_health_probes:
+        description: "Space-separated list of HTTP URLs the VM curls to confirm the compose stack is ready. Any 2xx-4xx response counts as ready; 5xx / connection failures retry until the 5-minute budget is exhausted. Default probes cover nginx (`/`) and the superapp backend (`/api/categories`); override for non-superapp stacks."
+        type: string
+        required: false
+        default: ""
     secrets:
       infra_repo_token:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
@@ -240,6 +265,8 @@ env:
   APP_REF: ${{ inputs.app_ref != '' && inputs.app_ref || github.ref_name }}
   APP_NAME: ${{ inputs.app_name || 'canabis-assistant-api' }}
   APP_PORT: ${{ inputs.app_port || inputs.demo_port || '8080' }}
+  GAR_REGISTRY: ${{ inputs.app_gar_registry }}
+  GAR_REGISTRY_HOST: ${{ inputs.app_gar_registry_host }}
 
 jobs:
   demo-vm:
@@ -452,16 +479,69 @@ jobs:
           fi
           echo "APP_ENV_FILE=$RUNNER_TEMP/app.env" >> "$GITHUB_ENV"
 
+      - name: Mint short-lived GAR access token for the VM
+        # Compose services reference images in a private Artifact
+        # Registry. Podman on a fresh Fedora VM has no registry auth, so
+        # the first pull would fail with "unauthorized: anonymous users".
+        #
+        # WIF is already authenticated earlier in the job by
+        # google-github-actions/auth@v2.1.7. The configured service
+        # account already has roles/artifactregistry.writer (which
+        # implies roles/artifactregistry.reader for the same scope), so
+        # we mint a one-hour OAuth access token for it via
+        # `gcloud auth print-access-token`.
+        #
+        # On the VM, deploy-compose-on-vm.sh reads the token from a
+        # scp'd file, writes it to /tmp/.gar-token, and pipes it into
+        # `podman login -u oauth2accesstoken --password-stdin`. After the
+        # podman login, the file is deleted. The token scope is whatever
+        # the SA's IAM role allows — for hermess-sa that's GAR
+        # reader/writer; it's not privileged enough to do anything
+        # outside the registry.
+        id: gar_token
+        if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') && inputs.app_gar_registry != '' }}
+        shell: bash
+        env:
+          GAR_REGISTRY: ${{ inputs.app_gar_registry }}
+          GAR_REGISTRY_HOST: ${{ inputs.app_gar_registry_host }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          : "${GAR_REGISTRY:=europe-west2-docker.pkg.dev}"
+          GAR_REGISTRY_HOST_VALUE="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY}}"
+          if [ ! -s "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+            echo "::error::WIF credentials not present at \$GOOGLE_APPLICATION_CREDENTIALS" >&2
+            exit 1
+          fi
+          echo "Minting GAR access token for ${GAR_REGISTRY_HOST_VALUE}"
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          GAR_TOKEN_FILE="$RUNNER_TEMP/gar-token.json"
+          printf '%s' "$ACCESS_TOKEN" > "$GAR_TOKEN_FILE"
+          echo "gar_registry_host=$GAR_REGISTRY_HOST_VALUE" >> "$GITHUB_OUTPUT"
+          echo "token_path=$GAR_TOKEN_FILE" >> "$GITHUB_OUTPUT"
+          # Best-effort cleanup; the file is in $RUNNER_TEMP which gets
+          # purged at the end of the job regardless.
+          echo "Token file: $GAR_TOKEN_FILE ($(wc -c < "$GAR_TOKEN_FILE") bytes, 1 h validity)"
+
       - name: Deploy app Docker Compose stack to VM
         if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
         working-directory: demo-vm-infra
         shell: bash
+        env:
+          # Optional GAR token, produced by the step above. Empty string
+          # when app_gar_registry is unset.
+          GAR_TOKEN_FILE: ${{ steps.gar_token.outputs.token_path || '' }}
         run: |
           set -euo pipefail
           APP_SOURCE_DIR="$GITHUB_WORKSPACE/app-source" \
           APP_NAME="$APP_NAME" \
           APP_PORT="$APP_PORT" \
+          GAR_REGISTRY="${GAR_REGISTRY:-}" \
+          GAR_REGISTRY_HOST="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY:-}}" \
           REMOTE_APP_DIR="/opt/$APP_NAME" \
+          COMPOSE_SUBDIR="${{ inputs.app_compose_subdir }}" \
+          APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
+          APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
           make deploy-compose
 
       - name: Smoke test demo VM
