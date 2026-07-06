@@ -88,7 +88,7 @@ fi
 
 # Multi-target readiness probe: any 2xx-4xx response = ready
 probe_ready() {
-  curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null | grep -qE '^[234][0-9][0-9]$'
+  curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null | grep -qE '^[234][0-9][0-9]$'
 }
 for i in $(seq 1 300); do
   all_ok=1
@@ -98,7 +98,7 @@ for i in $(seq 1 300); do
   if [ "$all_ok" = "1" ]; then
     echo "${APP_NAME} compose deployment OK on port ${APP_PORT}"
     for url in $APP_HEALTH_PROBES; do
-      printf '  %s -> HTTP %s\n' "$url" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url")"
+      printf '  %s -> HTTP %s\n' "$url" "$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 "$url")"
     done
     exit 0
   fi

@@ -69,6 +69,12 @@ variable "demo_port" {
   description = "HTTP demo/smoke-test port."
 }
 
+variable "https_port" {
+  type        = number
+  default     = 443
+  description = "HTTPS demo/smoke-test port exposed by the application compose stack."
+}
+
 variable "start_helper_health" {
   type        = bool
   default     = true
@@ -85,6 +91,12 @@ variable "allow_http_cidr" {
   type        = string
   default     = "0.0.0.0/0"
   description = "CIDR allowed for the temporary demo HTTP endpoint."
+}
+
+variable "allow_https_cidr" {
+  type        = string
+  default     = "0.0.0.0/0"
+  description = "CIDR allowed for the temporary demo HTTPS endpoint."
 }
 
 variable "create_firewall_rules" {

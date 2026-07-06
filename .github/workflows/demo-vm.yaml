@@ -53,6 +53,11 @@ on:
         type: string
         required: false
         default: "8080"
+      https_port:
+        description: "Demo HTTPS endpoint port."
+        type: string
+        required: false
+        default: "443"
       create_firewall_rules:
         description: "Create temporary HTTP/SSH firewall rules."
         type: boolean
@@ -258,6 +263,7 @@ env:
   ZONE: ${{ inputs.zone || 'europe-west1-b' }}
   ENVIRONMENT: ${{ inputs.environment || 'ci' }}
   DEMO_PORT: ${{ inputs.demo_port }}
+  HTTPS_PORT: ${{ inputs.https_port }}
   START_HELPER_HEALTH: ${{ inputs.app_deploy && 'false' || 'true' }}
   CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules }}
   AUTO_DELETE_AFTER_DURATION: ${{ inputs.auto_delete_after_duration }}

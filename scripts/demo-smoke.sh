@@ -27,7 +27,7 @@ probe_remote() {
   local url="$1"
   local code
   code="$(gcloud compute ssh "$NAME" --zone "$ZONE_OUT" --project "$PROJECT_ID" --quiet \
-    --command "curl -s -o /dev/null -w '%{http_code}' --max-time 5 '$url' || echo 000" 2>/dev/null \
+    --command "curl -ks -o /dev/null -w '%{http_code}' --max-time 5 '$url' || echo 000" 2>/dev/null \
     | tr -d '[:space:]')"
   case "$code" in
     2*|3*|4*) return 0 ;;
@@ -53,7 +53,7 @@ for i in $(seq 1 60); do
     echo "Smoke test OK via SSH. Public URL (firewall permitting): $URL"
     for url in $APP_HEALTH_PROBES; do
       code="$(gcloud compute ssh "$NAME" --zone "$ZONE_OUT" --project "$PROJECT_ID" --quiet \
-        --command "curl -s -o /dev/null -w '%{http_code}' --max-time 5 '$url' || echo 000" 2>/dev/null \
+        --command "curl -ks -o /dev/null -w '%{http_code}' --max-time 5 '$url' || echo 000" 2>/dev/null \
         | tr -d '[:space:]')"
       printf '  %s -> HTTP %s\n' "$url" "$code"
     done
