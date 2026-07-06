@@ -365,8 +365,16 @@ echo "Ensured assistant-db init SQL dir exists: $ASSISTANT_SQL_DIR_VALUE"
 #   3. ASSISTANT_SCHEMA_URL fetch (with auth via GITHUB_TOKEN if set,
 #      to dodge anonymous-curl rate-limit 404s on raw.githubusercontent.com).
 ASSISTANT_SCHEMA_SQL=""
-# 1. Vendor (always works)
-ASSISTANT_SCHEMA_SQL='$(cat <<'INIT_SQL'
+# 1. Vendor (always works). We write the SQL to a temp file via a
+# heredoc (no shell expansion, no quoting pitfalls) and read it
+# back. Trying to embed the SQL inline with a heredoc inside an
+# assignment / command substitution is fragile — bash parses the
+# leading-quote context before it sees the heredoc, and a stray quote
+# in the SQL body can break parsing (Regression: lolian/superapp
+# run 28790884772 — "unexpected EOF while looking for matching `'`").
+ASSISTANT_SCHEMA_TMP="$(mktemp -t assistant-schema.XXXXXX.sql)"
+trap 'rm -f "$ASSISTANT_SCHEMA_TMP"' EXIT
+cat > "$ASSISTANT_SCHEMA_TMP" <<'INIT_SQL'
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS cannabis_documents (
@@ -424,7 +432,9 @@ CREATE TABLE IF NOT EXISTS safety_events (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 INIT_SQL
-)
+ASSISTANT_SCHEMA_SQL="$(cat "$ASSISTANT_SCHEMA_TMP")"
+rm -f "$ASSISTANT_SCHEMA_TMP"
+trap - EXIT
 # 2. Custom schema file (overrides vendor)
 if [ -n "${ASSISTANT_SCHEMA_FILE:-}" ] && [ -f "${ASSISTANT_SCHEMA_FILE}" ]; then
   ASSISTANT_SCHEMA_SQL="$(cat "${ASSISTANT_SCHEMA_FILE}")"
