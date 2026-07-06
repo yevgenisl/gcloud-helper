@@ -357,24 +357,96 @@ echo "Ensured assistant-db init SQL dir exists: $ASSISTANT_SQL_DIR_VALUE"
 # `psycopg.errors.UndefinedTable: relation "cannabis_chunks" does
 # not exist`.
 #
-# Fix: fetch the schema from the canabis-assistant-api repo on the
-# public GitHub mirror and pipe it into the running assistant-db via
-# `podman exec psql`. The DDL is `CREATE TABLE IF NOT EXISTS`, so
-# this is idempotent and safe to re-run on subsequent deploys.
-ASSISTANT_SCHEMA_URL="${ASSISTANT_SCHEMA_URL:-https://raw.githubusercontent.com/yevgenisl/canabis-assistant-api/main/sql/init.sql}"
-if [ "${SKIP_ASSISTANT_SCHEMA:-0}" != "1" ]; then
-  echo "Bootstrapping assistant-db schema from $ASSISTANT_SCHEMA_URL"
+# Fix: try (in order):
+#   1. Vendor init.sql inline (always available; idempotent CREATE TABLE
+#      IF NOT EXISTS — safe across re-deploys).
+#   2. ASSISTANT_SCHEMA_FILE on the runner (path to a custom schema file
+#      scp'd alongside the tarball).
+#   3. ASSISTANT_SCHEMA_URL fetch (with auth via GITHUB_TOKEN if set,
+#      to dodge anonymous-curl rate-limit 404s on raw.githubusercontent.com).
+ASSISTANT_SCHEMA_SQL=""
+# 1. Vendor (always works)
+ASSISTANT_SCHEMA_SQL='$(cat <<'INIT_SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS cannabis_documents (
+    id BIGSERIAL PRIMARY KEY,
+    slug TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    source_url TEXT,
+    source_type TEXT,
+    jurisdiction TEXT,
+    category TEXT,
+    content TEXT NOT NULL,
+    status TEXT DEFAULT 'approved',
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    content_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cannabis_chunks (
+    id BIGSERIAL PRIMARY KEY,
+    document_id BIGINT REFERENCES cannabis_documents(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    content TEXT NOT NULL,
+    token_count INT NOT NULL,
+    embedding vector(64) NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(document_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS cannabis_documents_status_idx
+    ON cannabis_documents(status);
+CREATE INDEX IF NOT EXISTS cannabis_documents_category_idx
+    ON cannabis_documents(category);
+CREATE INDEX IF NOT EXISTS cannabis_documents_jurisdiction_idx
+    ON cannabis_documents(jurisdiction);
+CREATE INDEX IF NOT EXISTS cannabis_chunks_embedding_idx
+    ON cannabis_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+CREATE TABLE IF NOT EXISTS rag_retrieval_logs (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT,
+    user_question TEXT NOT NULL,
+    retrieved_chunk_ids BIGINT[] NOT NULL,
+    model TEXT NOT NULL DEFAULT 'mock-llm',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS safety_events (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT,
+    user_question TEXT NOT NULL,
+    category TEXT NOT NULL,
+    action TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+INIT_SQL
+)
+# 2. Custom schema file (overrides vendor)
+if [ -n "${ASSISTANT_SCHEMA_FILE:-}" ] && [ -f "${ASSISTANT_SCHEMA_FILE}" ]; then
+  ASSISTANT_SCHEMA_SQL="$(cat "${ASSISTANT_SCHEMA_FILE}")"
+  echo "Loaded assistant-db schema from ASSISTANT_SCHEMA_FILE=${ASSISTANT_SCHEMA_FILE}"
+elif [ -n "${ASSISTANT_SCHEMA_URL:-}" ]; then
+  # 3. URL fetch with optional auth to dodge 404 rate-limit
+  echo "Fetching assistant-db schema from $ASSISTANT_SCHEMA_URL (fallback after vendor)"
+  AUTH_ARGS=()
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    AUTH_ARGS=(-H "Authorization: token ${GITHUB_TOKEN}")
+  fi
   if command -v curl >/dev/null 2>&1; then
-    ASSISTANT_SCHEMA_SQL="$(curl -fsSL --max-time 30 "$ASSISTANT_SCHEMA_URL" || true)"
+    ASSISTANT_SCHEMA_SQL="$(curl -fsSL --max-time 30 "${AUTH_ARGS[@]}" "$ASSISTANT_SCHEMA_URL" || true)"
   elif command -v wget >/dev/null 2>&1; then
     ASSISTANT_SCHEMA_SQL="$(wget -qO- --timeout=30 "$ASSISTANT_SCHEMA_URL" || true)"
-  else
-    echo "::warning::curl/wget not found; skipping assistant-db schema bootstrap"
-    ASSISTANT_SCHEMA_SQL=""
   fi
-  if [ -n "${ASSISTANT_SCHEMA_SQL:-}" ]; then
-    # Apply schema. Retry briefly: assistant-db may still be healthy-
-    # checking on the first poll cycle after compose up.
+fi
+
+if [ "${SKIP_ASSISTANT_SCHEMA:-0}" != "1" ]; then
+  if [ -z "${ASSISTANT_SCHEMA_SQL:-}" ]; then
+    echo "::error::assistant-db schema bootstrap: no vendor, no file, no URL — chat will return 500 until schema is applied manually" >&2
+  else
     applied=0
     for attempt in $(seq 1 30); do
       if printf '%s\n' "$ASSISTANT_SCHEMA_SQL" | podman exec -i cannabis_assistant_db psql -U rag -d cannabis_rag -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
@@ -387,8 +459,6 @@ if [ "${SKIP_ASSISTANT_SCHEMA:-0}" != "1" ]; then
     if [ "$applied" != "1" ]; then
       echo "::warning::assistant-db schema bootstrap failed after 60s; chat will return 500 until schema is applied manually" >&2
     fi
-  else
-    echo "::warning::could not fetch assistant-db schema from $ASSISTANT_SCHEMA_URL; chat may return 500" >&2
   fi
 else
   echo "Skipping assistant-db schema bootstrap (SKIP_ASSISTANT_SCHEMA=1)"
