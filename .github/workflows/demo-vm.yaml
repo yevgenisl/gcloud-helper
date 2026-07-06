@@ -571,10 +571,11 @@ jobs:
           APP_SOURCE_DIR="$GITHUB_WORKSPACE/app-source" \
           APP_NAME="$APP_NAME" \
           APP_PORT="$APP_PORT" \
-          GAR_REGISTRY="${GAR_REGISTRY:-}" \
-          GAR_REGISTRY_HOST="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY:-}}" \
+          APP_GAR_REGISTRY="${GAR_REGISTRY:-}" \
+          APP_GAR_REGISTRY_HOST="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY:-}}" \
+          APP_GAR_TOKEN_FILE="$GAR_TOKEN_FILE" \
           REMOTE_APP_DIR="/opt/$APP_NAME" \
-          COMPOSE_SUBDIR="${{ inputs.app_compose_subdir }}" \
+          APP_COMPOSE_SUBDIR="${{ inputs.app_compose_subdir }}" \
           APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
           APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
           APP_POST_DEPLOY_SCRIPT="${{ inputs.app_post_deploy_script }}" \
