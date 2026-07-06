@@ -194,9 +194,10 @@ Deployment behavior:
 2. packages it without `.git`;
 3. uploads it to the VM with `gcloud compute scp`;
 4. extracts it under `/opt/<app_name>`;
-5. writes a safe default `.env` when no `app_env` secret is provided;
-6. runs `podman compose` / `podman-compose` with `postgres api`;
-7. verifies `http://127.0.0.1:<app_port>/health` from inside the VM.
+5. descends into `<app_compose_subdir>` (default empty → repo root) before invoking `podman compose`;
+6. writes a safe default `.env` when no `app_env` secret is provided, with auto-generated `SUPERAPP_DB_PASSWORD`, `ASSISTANT_DB_PASSWORD`, and `JWT_SECRET`, and `MOCK_LLM=true` so the assistant works without an OpenRouter key;
+7. authenticates podman against the private GAR (if `app_gar_registry` is set), then runs `podman compose up -d` (no `--build`: the compose file is image-only by contract);
+8. verifies `http://127.0.0.1:<app_port>/` (nginx → frontend) AND `http://127.0.0.1:<app_port>/api/categories` (nginx → backend) respond before declaring success.
 
 For real non-mock LLM mode, pass a `.env` content to the VM via one of (highest precedence first):
 
@@ -207,6 +208,42 @@ For real non-mock LLM mode, pass a `.env` content to the VM via one of (highest 
 | `secrets.app_env` | secret input | Quick path: paste the full `.env` into a GH repo secret. |
 
 Never put API keys directly into `inputs.*` — they appear in workflow run logs.
+
+### Superapp-specific example
+
+The reusable workflow is designed to fit `lolian/superapp` (which keeps its compose file under `deployment/`) without any source-build step. Caller workflow:
+
+```yaml
+jobs:
+  demo-vm:
+    uses: yevgenisl/gcloud-helper/.github/workflows/demo-vm.yaml@main
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      mode: e2e
+      app_deploy: true
+      app_repo: lolian/superapp
+      app_ref: main
+      app_name: superapp
+      app_port: "8080"
+      app_compose_subdir: deployment        # compose file lives under deployment/
+      app_image_tag: latest                 # API_TAG/WEB_TAG/ASSISTANT_TAG
+      app_gar_registry: europe-west2-docker.pkg.dev
+      create_firewall_rules: true
+      max_run_duration_seconds: "10800"
+```
+
+What happens:
+
+- the runner checks out `lolian/superapp@main` into `app-source/`;
+- the runner tars `app-source/` (no `.git`) and scp's it to `/opt/superapp/` on the VM;
+- the VM extracts it, descends into `/opt/superapp/deployment/`, and `podman compose up -d`'s the seven-service stack;
+- `REGISTRY`, `API_TAG`, `WEB_TAG`, `ASSISTANT_TAG` come from the .env, pulling from your private GAR;
+- podman is authenticated against GAR via the 1-h OAuth token (no SA key on the VM);
+- the script waits for nginx `/` and `/api/categories` to return 2xx-4xx before declaring success.
+
+Override `app_compose_subdir` (e.g. empty for repos where compose is at the repo root) and `app_image_tag` (e.g. `sha-abc1234` for a pinned build) to fit other stacks.
 
 ### Private Artifact Registry pulls
 

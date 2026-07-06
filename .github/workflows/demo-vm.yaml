@@ -128,6 +128,21 @@ on:
         type: string
         required: false
         default: ""
+      app_compose_subdir:
+        description: "Path inside the checked-out app repo that contains docker-compose.yml. Set to `deployment` for repos like lolian/superapp where compose lives under deployment/, or leave empty for repos where compose is at the repo root."
+        type: string
+        required: false
+        default: ""
+      app_image_tag:
+        description: "Image tag baked into the rendered .env as API_TAG/WEB_TAG/ASSISTANT_TAG. Defaults to `latest`. Override to pin a specific build (e.g. `sha-abc1234`)."
+        type: string
+        required: false
+        default: "latest"
+      app_health_probes:
+        description: "Space-separated list of HTTP URLs the VM curls to confirm the compose stack is ready. Any 2xx-4xx response counts as ready; 5xx / connection failures retry until the 5-minute budget is exhausted. Default probes cover nginx (`/`) and the superapp backend (`/api/categories`); override for non-superapp stacks."
+        type: string
+        required: false
+        default: ""
     secrets:
       infra_repo_token:
         description: "Optional token with contents:read for checking out this private infra repo from another private repo."
@@ -524,6 +539,9 @@ jobs:
           GAR_REGISTRY="${GAR_REGISTRY:-}" \
           GAR_REGISTRY_HOST="${GAR_REGISTRY_HOST:-https://${GAR_REGISTRY:-}}" \
           REMOTE_APP_DIR="/opt/$APP_NAME" \
+          COMPOSE_SUBDIR="${{ inputs.app_compose_subdir }}" \
+          APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
+          APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
           make deploy-compose
 
       - name: Smoke test demo VM
