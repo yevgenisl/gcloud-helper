@@ -98,10 +98,17 @@ if command -v dnf >/dev/null 2>&1; then
     echo "waiting for VM startup bootstrap to finish before package install ($i/60)"
     sleep 5
   done
-  dnf -y install podman git curl jq python3
+  # openssl is needed by the safe-default .env heredoc below
+  # (`openssl rand -hex 24` for DB passwords, `openssl rand -base64 48`
+  # for JWT_SECRET). Without it the heredoc emits literal `<hash>` /
+  # `latest` / `compose` tokens into the .env file and podman-compose
+  # then errors with `SUPERAPP_DB_PASSWORD must be set` (the value is
+  # the literal command name, not a hex string).
+  # Regression: lolian/superapp run 28768411928.
+  dnf -y install podman git curl jq python3 openssl
   dnf -y install podman-compose || true
 elif command -v yum >/dev/null 2>&1; then
-  yum -y install podman git curl jq python3
+  yum -y install podman git curl jq python3 openssl
   yum -y install podman-compose || true
 fi
 
