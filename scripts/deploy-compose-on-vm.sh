@@ -61,7 +61,14 @@ scp_to_vm "$APP_GAR_TOKEN_FILE" "$REMOTE_GAR_TOKEN" "GAR auth token" || REMOTE_G
 scp_to_vm "$APP_POST_DEPLOY_SCRIPT" "$REMOTE_POST_DEPLOY" "post-deploy script" || REMOTE_POST_DEPLOY=""
 
 # --- Run the generic remote deploy script on the VM -------------------------
-REMOTE_SCRIPT_SRC="$(dirname "${BASH_SOURCE[0]}")/deploy-compose-remote.sh"
+# Resolve the path to the sibling deploy-compose-remote.sh relative
+# to this script's own location, so it works regardless of cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REMOTE_SCRIPT_SRC="${SCRIPT_DIR}/deploy-compose-remote.sh"
+if [ ! -f "$REMOTE_SCRIPT_SRC" ]; then
+  echo "::error::Remote deploy script not found: $REMOTE_SCRIPT_SRC" >&2
+  exit 2
+fi
 gcloud compute scp "$REMOTE_SCRIPT_SRC" "$NAME:$REMOTE_SCRIPT" \
     --zone "$ZONE_OUT" --project "$PROJECT_ID" --quiet
 
