@@ -252,7 +252,6 @@ env:
   REGION: ${{ inputs.region || 'europe-west1' }}
   ZONE: ${{ inputs.zone || 'europe-west1-b' }}
   ENVIRONMENT: ${{ inputs.environment || 'ci' }}
-  RUN_ID: ${{ steps.resolve.outputs.run_id || inputs.run_id || 'demo' }}
   DEMO_PORT: ${{ inputs.demo_port }}
   START_HELPER_HEALTH: ${{ inputs.app_deploy && 'false' || 'true' }}
   CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules }}
@@ -302,6 +301,13 @@ jobs:
           # canonical pattern for ephemeral environments.
           RESOLVED_RUN_ID="${INPUTS_RUN_ID:-demo}"
 
+          # Persist to GITHUB_ENV so all subsequent steps inherit it.
+          # Job-level env: can't reference `steps.resolve.outputs.*`
+          # (steps run after env evaluation), so this is the only
+          # way to plumb the resolved run_id down to make/tofu.
+          echo "RUN_ID=${RESOLVED_RUN_ID}" >> "$GITHUB_ENV"
+
+          # Echo on stdout for the job log + downstream step outputs.
           echo "run_id=${RESOLVED_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "Resolved run id: ${RESOLVED_RUN_ID}"
 
