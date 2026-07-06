@@ -77,7 +77,7 @@ fi
 # Refresh remote images before recreating containers. This is especially
 # important for `:latest` demo deploys on a reused deterministic VM.
 "${COMPOSE[@]}" pull || true
-"${COMPOSE[@]}" up -d
+"${COMPOSE[@]}" up -d --force-recreate
 "${COMPOSE[@]}" ps
 
 # Caller-supplied post-deploy hook (e.g. apply DB schema, warm caches)
