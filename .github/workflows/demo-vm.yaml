@@ -34,10 +34,10 @@ on:
         required: false
         default: ci
       run_id:
-        description: "Stable run id for names/state. Leave empty to use gh-<github.run_id>."
+        description: "Environment name. Identifies which VM/state this invocation owns. Same name always maps to the same VM and the same GCS state prefix. Default: 'demo'. Pick a stable name per environment (e.g. 'ci', 'staging', 'qa-bob') so a follow-up mode=down can target the right one."
         type: string
         required: false
-        default: ""
+        default: "demo"
       region:
         description: "GCP region."
         type: string
@@ -176,10 +176,10 @@ on:
         required: true
         default: e2e
       run_id:
-        description: "Stable run id. Leave empty to use gh-<github.run_id>."
+        description: "Environment name. Identifies which VM/state this invocation owns. Same name always maps to the same VM and the same GCS state prefix. Default: 'demo'. Pick a stable name per environment (e.g. 'ci', 'staging', 'qa-bob') so a follow-up mode=down can target the right one."
         type: string
         required: false
-        default: ""
+        default: "demo"
       create_firewall_rules:
         description: "Create temporary HTTP/SSH firewall rules."
         type: boolean
@@ -252,7 +252,7 @@ env:
   REGION: ${{ inputs.region || 'europe-west1' }}
   ZONE: ${{ inputs.zone || 'europe-west1-b' }}
   ENVIRONMENT: ${{ inputs.environment || 'ci' }}
-  RUN_ID: ${{ inputs.run_id != '' && inputs.run_id || format('gh-{0}', github.run_id) }}
+  RUN_ID: ${{ steps.resolve.outputs.run_id || inputs.run_id || 'demo' }}
   DEMO_PORT: ${{ inputs.demo_port }}
   START_HELPER_HEALTH: ${{ inputs.app_deploy && 'false' || 'true' }}
   CREATE_FIREWALL_RULES: ${{ inputs.create_firewall_rules }}
@@ -283,14 +283,27 @@ jobs:
       - name: Resolve inputs
         id: resolve
         shell: bash
+        env:
+          INPUTS_RUN_ID: ${{ inputs.run_id }}
+          INPUTS_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
-          case "${{ inputs.mode || 'e2e' }}" in
+          case "$INPUTS_MODE" in
             up|smoke|down|e2e) ;;
-            *) echo "Invalid mode: ${{ inputs.mode }}" >&2; exit 2 ;;
+            *) echo "Invalid mode: $INPUTS_MODE" >&2; exit 2 ;;
           esac
-          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "Resolved run id: ${RUN_ID}"
+
+          # RUN_ID is a stable environment name (default: "demo"). It
+          # identifies which deployment environment this invocation
+          # belongs to — same env name always maps to the same VM and
+          # the same GCS state prefix. To provision/destroy a specific
+          # env, pass `run_id: <env-name>`; to tear down without an
+          # up run, the same `run_id` reaches destroy. This is the
+          # canonical pattern for ephemeral environments.
+          RESOLVED_RUN_ID="${INPUTS_RUN_ID:-demo}"
+
+          echo "run_id=${RESOLVED_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "Resolved run id: ${RESOLVED_RUN_ID}"
 
       - name: Checkout demo VM infra repo
         uses: actions/checkout@v4
