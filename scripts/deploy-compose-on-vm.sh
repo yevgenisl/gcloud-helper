@@ -228,6 +228,15 @@ POSTGRES_HOST_PORT=5432
 ASSISTANT_POSTGRES_HOST_PORT=5433
 # Seed/migrate run as part of every `compose up`. Disable here if you
 # want a fresh DB. (See deployment/docker-compose.yml for details.)
+
+# Next.js /api/chat route handler calls process.env.CHAT_API_URL on every
+# request. The compose default is "http://nginx/api/chat" — but nginx
+# routes /api/chat back to the frontend itself, creating a self-loop
+# that times out and surfaces as "Chat service is unavailable" (502).
+# Point Next.js directly at the assistant-api service on the compose
+# network. Override via APP_ENV_FILE if you front the assistant with a
+# different hostname / port.
+CHAT_API_URL=http://assistant-api:8080/chat
 ENV
   chmod 0600 .env
   echo "Auto-generated demo .env (rotate before non-demo use)"
@@ -301,6 +310,53 @@ echo "Ensured assistant-db init SQL dir exists: $ASSISTANT_SQL_DIR_VALUE"
 
 "${COMPOSE[@]}" up -d
 "${COMPOSE[@]}" ps
+
+# Initialize the assistant-db schema. The compose file's
+# assistant-db mounts ${ASSISTANT_SQL_DIR:-./sql} into
+# /docker-entrypoint-initdb.d but doesn't ship the SQL itself — the
+# schema lives in the canabis-assistant-api repo (a separate
+# multi-repo dependency, see compose file comment). When the bind-
+# mount is empty (our default), postgres sees an empty init dir, runs
+# no DDL, and the assistant-api's `retrieve()` query later fails with
+# `psycopg.errors.UndefinedTable: relation "cannabis_chunks" does
+# not exist`.
+#
+# Fix: fetch the schema from the canabis-assistant-api repo on the
+# public GitHub mirror and pipe it into the running assistant-db via
+# `podman exec psql`. The DDL is `CREATE TABLE IF NOT EXISTS`, so
+# this is idempotent and safe to re-run on subsequent deploys.
+ASSISTANT_SCHEMA_URL="${ASSISTANT_SCHEMA_URL:-https://raw.githubusercontent.com/yevgenisl/canabis-assistant-api/main/sql/init.sql}"
+if [ "${SKIP_ASSISTANT_SCHEMA:-0}" != "1" ]; then
+  echo "Bootstrapping assistant-db schema from $ASSISTANT_SCHEMA_URL"
+  if command -v curl >/dev/null 2>&1; then
+    ASSISTANT_SCHEMA_SQL="$(curl -fsSL --max-time 30 "$ASSISTANT_SCHEMA_URL" || true)"
+  elif command -v wget >/dev/null 2>&1; then
+    ASSISTANT_SCHEMA_SQL="$(wget -qO- --timeout=30 "$ASSISTANT_SCHEMA_URL" || true)"
+  else
+    echo "::warning::curl/wget not found; skipping assistant-db schema bootstrap"
+    ASSISTANT_SCHEMA_SQL=""
+  fi
+  if [ -n "${ASSISTANT_SCHEMA_SQL:-}" ]; then
+    # Apply schema. Retry briefly: assistant-db may still be healthy-
+    # checking on the first poll cycle after compose up.
+    applied=0
+    for attempt in $(seq 1 30); do
+      if printf '%s\n' "$ASSISTANT_SCHEMA_SQL" | podman exec -i cannabis_assistant_db psql -U rag -d cannabis_rag -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+        echo "assistant-db schema applied (attempt $attempt)"
+        applied=1
+        break
+      fi
+      sleep 2
+    done
+    if [ "$applied" != "1" ]; then
+      echo "::warning::assistant-db schema bootstrap failed after 60s; chat will return 500 until schema is applied manually" >&2
+    fi
+  else
+    echo "::warning::could not fetch assistant-db schema from $ASSISTANT_SCHEMA_URL; chat may return 500" >&2
+  fi
+else
+  echo "Skipping assistant-db schema bootstrap (SKIP_ASSISTANT_SCHEMA=1)"
+fi
 
 # Multi-target readiness probe. A real-world compose stack (e.g.
 # lolian/superapp) has many internal services; nginx serving the
