@@ -11,6 +11,12 @@ elif command -v yum >/dev/null 2>&1; then
   yum -y install podman git curl jq python3 || true
 fi
 
+# Demo app stacks may publish HTTPS on 443 from rootless Podman.
+# Fedora defaults often reserve ports <1024 for root only; relax this on
+# ephemeral demo VMs so container port publishing can bind 443.
+sysctl -w net.ipv4.ip_unprivileged_port_start=0 || true
+printf 'net.ipv4.ip_unprivileged_port_start=0\n' >/etc/sysctl.d/99-hermes-demo-unprivileged-ports.conf
+
 if [ "${start_helper_health}" != "true" ]; then
   systemctl enable --now podman.socket || true
   echo "startup complete without helper health service" >/opt/hermes-demo/ready

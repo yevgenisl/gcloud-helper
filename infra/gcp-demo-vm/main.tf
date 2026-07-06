@@ -34,6 +34,21 @@ resource "google_compute_firewall" "demo_http" {
   target_tags   = [local.name]
 }
 
+resource "google_compute_firewall" "demo_https" {
+  count       = var.create_firewall_rules ? 1 : 0
+  name        = "${local.name}-https"
+  network     = "default"
+  description = "Temporary demo HTTPS access for ${local.name}"
+
+  allow {
+    protocol = "tcp"
+    ports    = [tostring(var.https_port)]
+  }
+
+  source_ranges = [var.allow_https_cidr]
+  target_tags   = [local.name]
+}
+
 resource "google_compute_firewall" "demo_ssh" {
   count       = var.create_firewall_rules ? 1 : 0
   name        = "${local.name}-ssh"
