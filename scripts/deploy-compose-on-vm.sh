@@ -12,7 +12,9 @@
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# Resolve paths relative to this script before changing cwd to TF_DIR below.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 ensure_prereqs
 
 APP_SOURCE_DIR="${APP_SOURCE_DIR:?APP_SOURCE_DIR is required}"
@@ -61,9 +63,6 @@ scp_to_vm "$APP_GAR_TOKEN_FILE" "$REMOTE_GAR_TOKEN" "GAR auth token" || REMOTE_G
 scp_to_vm "$APP_POST_DEPLOY_SCRIPT" "$REMOTE_POST_DEPLOY" "post-deploy script" || REMOTE_POST_DEPLOY=""
 
 # --- Run the generic remote deploy script on the VM -------------------------
-# Resolve the path to the sibling deploy-compose-remote.sh relative
-# to this script's own location, so it works regardless of cwd.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_SCRIPT_SRC="${SCRIPT_DIR}/deploy-compose-remote.sh"
 if [ ! -f "$REMOTE_SCRIPT_SRC" ]; then
   echo "::error::Remote deploy script not found: $REMOTE_SCRIPT_SRC" >&2
