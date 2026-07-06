@@ -548,6 +548,8 @@ jobs:
         if: ${{ inputs.mode == 'smoke' || inputs.mode == 'e2e' }}
         working-directory: demo-vm-infra
         shell: bash
+        env:
+          APP_HEALTH_PROBES: ${{ inputs.app_health_probes }}
         run: make demo-smoke
 
       - name: Destroy demo VM
