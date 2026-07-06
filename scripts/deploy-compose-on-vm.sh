@@ -206,10 +206,16 @@ OPENROUTER_API_KEY=OPENROUTER_PLACEHOLDER_REPLACE_VIA_APP_ENV_FILE
 OPENROUTER_CHAT_MODEL=mistralai/mistral-small-3.2-24b-instruct
 OPENROUTER_FALLBACK_MODEL=mistralai/mistral-small-2603
 OPENROUTER_INGEST_MODEL=mistralai/mistral-small-3.2-24b-instruct
-# Image tags + registry. These feed into the compose file's
-# `${REGISTRY:-...}` and `${API_TAG:-latest}` substitutions so the
-# correct GAR images are pulled.
-REGISTRY=${GAR_REGISTRY_HOST#https://}
+# Image tags + registry. The compose file's
+#   image: ${REGISTRY:-europe-west2-docker.pkg.dev/canaverse/canabis-superapp}/api:${API_TAG:-latest}
+# already provides the GAR project path as its default. Setting
+# REGISTRY= just the hostname would break the substitution and
+# produce `europe-west2-docker.pkg.dev/api:latest` (no project) which
+# GAR rejects with 400 Bad Request. We therefore leave REGISTRY
+# UNSET in the default .env so compose's `:-` default kicks in.
+# Override REGISTRY here only if you deploy to a different GAR
+# project. (The podman login on the VM still uses the hostname
+# GAR_REGISTRY_HOST regardless.)
 API_TAG=${APP_IMAGE_TAG}
 WEB_TAG=${APP_IMAGE_TAG}
 ASSISTANT_TAG=${APP_IMAGE_TAG}
