@@ -587,6 +587,49 @@ jobs:
           APP_POST_DEPLOY_SCRIPT="${{ inputs.app_post_deploy_script }}" \
           make deploy-compose
 
+      - name: Print demo addresses
+        if: ${{ inputs.app_deploy && (inputs.mode == 'up' || inputs.mode == 'e2e') }}
+        shell: bash
+        env:
+          EXTERNAL_IP: ${{ steps.capture.outputs.external_ip }}
+          DEMO_URL: ${{ steps.capture.outputs.demo_url }}
+          APP_PORT: ${{ env.APP_PORT }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EXTERNAL_IP" ]; then
+            echo "::warning::No external_ip output is available; cannot print nip.io demo address."
+            exit 0
+          fi
+          NIP_HOST="${EXTERNAL_IP//./-}.nip.io"
+          HTTP_URL="http://${NIP_HOST}:${APP_PORT}/"
+          HTTPS_URL="https://${NIP_HOST}/"
+          RAW_HTTP_URL="${DEMO_URL:-http://${EXTERNAL_IP}:${APP_PORT}}"
+          RAW_HTTPS_URL="https://${EXTERNAL_IP}/"
+
+          echo "Demo public IP: ${EXTERNAL_IP}"
+          echo "Demo nip.io host: ${NIP_HOST}"
+          echo "Demo HTTP URL: ${HTTP_URL}"
+          echo "Demo HTTPS URL: ${HTTPS_URL}"
+          echo "::notice title=Demo URL::${HTTPS_URL}"
+
+          {
+            echo "## Demo address"
+            echo
+            echo "| Kind | URL |"
+            echo "| --- | --- |"
+            echo "| HTTPS nip.io | [${HTTPS_URL}](${HTTPS_URL}) |"
+            echo "| HTTP nip.io | [${HTTP_URL}](${HTTP_URL}) |"
+            echo "| HTTPS raw IP | [${RAW_HTTPS_URL}](${RAW_HTTPS_URL}) |"
+            echo "| HTTP raw IP | [${RAW_HTTP_URL}](${RAW_HTTP_URL}) |"
+            echo
+            echo "`${NIP_HOST}` maps to `${EXTERNAL_IP}`."
+            if [ "$MODE" = "e2e" ]; then
+              echo
+              echo "> Note: this was an e2e run, so the VM is destroyed after smoke tests. Use `mode=up` to keep the demo URL live."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Smoke test demo VM
         if: ${{ inputs.mode == 'smoke' || inputs.mode == 'e2e' }}
         working-directory: demo-vm-infra
