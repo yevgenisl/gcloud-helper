@@ -138,6 +138,16 @@ on:
         type: string
         required: false
         default: ""
+      app_nginx_fqdn_host:
+        description: "Public hostname of the demo VM (e.g. 35-189-201-33.nip.io). Plumbed into the app .env as NGINX_FQDN_HOST; the app's nginx container generates a self-signed TLS cert with this name as SAN."
+        type: string
+        required: false
+        default: ""
+      app_nginx_fqdn_cms:
+        description: "Public hostname of the Strapi CMS subdomain (e.g. cms.35-189-201-33.nip.io). Plumbed into the app .env as NGINX_FQDN_CMS; the app's nginx container adds this to the cert SAN list so the cms.<host> subdomain is reachable over the same cert."
+        type: string
+        required: false
+        default: ""
       app_image_tag:
         description: "Image tag baked into the rendered .env as API_TAG/WEB_TAG/ASSISTANT_TAG. Defaults to `latest`. Override to pin a specific build (e.g. `sha-abc1234`)."
         type: string
@@ -585,6 +595,8 @@ jobs:
           APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
           APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
           APP_POST_DEPLOY_SCRIPT="${{ inputs.app_post_deploy_script }}" \
+          NGINX_FQDN_HOST="${{ inputs.app_nginx_fqdn_host }}" \
+          NGINX_FQDN_CMS="${{ inputs.app_nginx_fqdn_cms }}" \
           make deploy-compose
 
       - name: Print demo addresses
