@@ -585,6 +585,8 @@ jobs:
           APP_IMAGE_TAG="${{ inputs.app_image_tag }}" \
           APP_HEALTH_PROBES="${{ inputs.app_health_probes }}" \
           APP_POST_DEPLOY_SCRIPT="${{ inputs.app_post_deploy_script }}" \
+          NGINX_FQDN_HOST="${{ inputs.app_nginx_fqdn_host }}" \
+          NGINX_FQDN_CMS="${{ inputs.app_nginx_fqdn_cms }}" \
           make deploy-compose
 
       - name: Print demo addresses
