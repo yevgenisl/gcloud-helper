@@ -30,9 +30,33 @@ ensure_prereqs() {
   require_cmd gcloud
   require_cmd tofu
   require_cmd curl
+  require_cmd python3
   # Do not run `gcloud config set project` here: when Cloud Resource Manager is
   # disabled for the project, that command emits noisy warnings even though the
   # explicit `--project` flags used by these scripts work correctly.
+}
+
+# Convert the RFC3339 timestamps emitted by `gcloud storage ls -L` to Unix
+# seconds. BusyBox date (used by the Semaphore runner) cannot parse a trailing
+# `Z` with `date -d`, so use Python's standard-library ISO-8601 parser instead.
+rfc3339_to_epoch() {
+  local value="${1:?RFC3339 timestamp is required}"
+  python3 - "$value" <<'PY'
+from datetime import datetime, timezone
+import sys
+
+try:
+    value = sys.argv[1]
+    if value.endswith("Z"):
+        value = f"{value[:-1]}+00:00"
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    print(int(parsed.timestamp()))
+except (IndexError, OverflowError, TypeError, ValueError) as error:
+    print(f"invalid RFC3339 timestamp: {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY
 }
 
 write_backend_config() {

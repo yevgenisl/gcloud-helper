@@ -132,7 +132,12 @@ clear_stale_lock() {
     return 0
   fi
   local age_minutes
-  age_minutes=$(( ( $(date -u +%s) - $(date -u -d "$updated" +%s) ) / 60 ))
+  local updated_epoch
+  if ! updated_epoch="$(rfc3339_to_epoch "$updated")"; then
+    echo "[tofu-destroy] WARN: could not parse lock update time '$updated'; leaving lock untouched"
+    return 0
+  fi
+  age_minutes=$(( ( $(date -u +%s) - updated_epoch ) / 60 ))
   if [ "$age_minutes" -lt "$max_age_minutes" ]; then
     echo "[tofu-destroy] state lock is $age_minutes min old (< $max_age_minutes); leaving it alone"
     return 0
@@ -216,7 +221,12 @@ except Exception:
       if [ -z "$updated" ]; then
         continue
       fi
-      local age_minutes=$(( ( $(date -u +%s) - $(date -u -d "$updated" +%s) ) / 60 ))
+      local updated_epoch
+      if ! updated_epoch="$(rfc3339_to_epoch "$updated")"; then
+        echo "[tofu-destroy] WARN: could not parse state update time '$updated'; skipping it"
+        continue
+      fi
+      local age_minutes=$(( ( $(date -u +%s) - updated_epoch ) / 60 ))
       if [ "$age_minutes" -lt "$min_age_minutes" ]; then
         echo "[tofu-destroy] skipping $path (only $age_minutes min old, < $min_age_minutes)"
         continue
