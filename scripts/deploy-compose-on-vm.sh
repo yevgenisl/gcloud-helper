@@ -33,7 +33,10 @@ cd "$TF_DIR"
 NAME=$(tofu output -raw instance_name)
 ZONE_OUT=$(tofu output -raw zone | awk -F/ '{print $NF}')
 
-ARCHIVE="$(mktemp -t "${APP_NAME}.XXXXXX.tar.gz")"
+# BusyBox mktemp (used by the Semaphore runner) requires its template to end
+# in XXXXXX. The archive's local suffix is irrelevant because the remote name
+# remains /tmp/<app>.tar.gz.
+ARCHIVE="$(mktemp -t "${APP_NAME}.XXXXXX")"
 REMOTE_ARCHIVE="/tmp/${APP_NAME}.tar.gz"
 REMOTE_SCRIPT="/tmp/${APP_NAME}-deploy.sh"
 REMOTE_ENV="/tmp/${APP_NAME}.env"
