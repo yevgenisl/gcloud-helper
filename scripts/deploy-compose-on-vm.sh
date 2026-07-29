@@ -29,7 +29,16 @@ APP_GAR_TOKEN_FILE="${APP_GAR_TOKEN_FILE:-}"
 APP_POST_DEPLOY_SCRIPT="${APP_POST_DEPLOY_SCRIPT:-}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/${APP_NAME}}"
 
+# This helper is callable directly by application Makefiles, not only after
+# demo-up. Re-initialize the requested backend here because `tofu output`
+# validates the selected provider package before it reads state; a fresh or
+# pruned runner otherwise fails with "Required plugins are not installed".
+# Reconfigure is idempotent and also prevents a previous demo's local backend
+# metadata from selecting the wrong state prefix.
+write_backend_config
 cd "$TF_DIR"
+echo "Initializing OpenTofu backend and providers for compose deployment"
+tofu init -input=false -reconfigure -backend-config=backend.hcl -no-color
 NAME=$(tofu output -raw instance_name)
 ZONE_OUT=$(tofu output -raw zone | awk -F/ '{print $NF}')
 
