@@ -77,7 +77,14 @@ fi
 # Refresh remote images before recreating containers. This is especially
 # important for `:latest` demo deploys on a reused deterministic VM.
 "${COMPOSE[@]}" pull || true
-"${COMPOSE[@]}" up -d --force-recreate
+# `up --force-recreate` asks Podman to replace containers service-by-service.
+# That fails when an old container still has dependents (for example a backend
+# still referenced by frontend/nginx), leaving the old hard-coded
+# `container_name` values in place. Tear down this Compose project first: the
+# Compose dependency graph removes dependents in reverse order, preserves named
+# volumes, and then allows a clean recreation.
+"${COMPOSE[@]}" down --remove-orphans
+"${COMPOSE[@]}" up -d --force-recreate --remove-orphans
 "${COMPOSE[@]}" ps
 
 # Caller-supplied post-deploy hook (e.g. apply DB schema, warm caches)
