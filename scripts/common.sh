@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Existing scripts are VM-only unless their entrypoint explicitly dispatches GKE.
+[[ "${DEMO_TARGET:-vm}" == vm ]] || { printf "Unsupported target for this entrypoint\n" >&2; exit 64; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/infra/gcp-demo-vm"
