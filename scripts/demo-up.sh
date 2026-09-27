@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+if [[ "${DEMO_TARGET:-vm}" == gke ]]; then
+  exec python3 "$(dirname "${BASH_SOURCE[0]}")/../infra/gcp-demo-gke/lifecycle.py" provision "$@"
+fi
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 ensure_prereqs
 # The backend is selected dynamically from ENVIRONMENT/RUN_ID.  Merely

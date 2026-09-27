@@ -16,3 +16,6 @@ crash.*.log
 .DS_Store
 .idea/
 .vscode/
+
+**/.runs/
+**/__pycache__/
