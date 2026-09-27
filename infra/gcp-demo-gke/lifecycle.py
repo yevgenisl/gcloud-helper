@@ -41,9 +41,17 @@ def validate(config):
         require(re.fullmatch(pattern, config[key]), f"Invalid {key}")
     require(len(resource_name(config)) <= 30, "Combined app/environment/owner/run name exceeds SA limit 30")
     net = ipaddress.IPv4Network(config["admin_cidr"], strict=True)
+    require(str(net) == config["admin_cidr"], "admin_cidr must be canonical CIDR notation")
+    require(type(config["public_endpoint"]) is bool, "public_endpoint must be boolean")
     allowed = [ipaddress.IPv4Network(c) for c in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
-    require(net.version == 4 and net.prefixlen >= 24 and any(net.subnet_of(c) for c in allowed),
-            "admin_cidr must be canonical RFC1918 IPv4 /24 or narrower")
+    if config["public_endpoint"]:
+        require(net.prefixlen == 32 and net.network_address.is_global
+                and not net.network_address.is_multicast
+                and not any(net.subnet_of(ipaddress.IPv4Network(c)) for c in ("192.0.0.0/24", "192.88.99.0/24")),
+                "Public admin_cidr must be canonical globally routable IPv4 /32")
+    else:
+        require(net.prefixlen >= 24 and any(net.subnet_of(c) for c in allowed),
+                "Private admin_cidr must be canonical RFC1918 IPv4 /24 or narrower")
     require(type(config["spot"]) is bool, "spot must be boolean")
 
 
@@ -79,6 +87,17 @@ def check_resource(address, values, config):
         require(values.get("name") == name, f"Foreign resource name: {address}")
         if address.startswith("google_container_"):
             require(values.get("location") == config["zone"], "Foreign cluster zone")
+            if address == "google_container_cluster.demo":
+                private = values.get("private_cluster_config") or []
+                authorized = values.get("master_authorized_networks_config") or []
+                require(len(private) == 1 and private[0].get("enable_private_nodes") is True
+                        and private[0].get("enable_private_endpoint") is (not config["public_endpoint"]),
+                        "Unknown or changed endpoint mode/private worker scope")
+                require(len(authorized) == 1
+                        and authorized[0].get("private_endpoint_enforcement_enabled") is True
+                        and authorized[0].get("gcp_public_cidrs_access_enabled") is False
+                        and [c.get("cidr_block") for c in authorized[0].get("cidr_blocks", [])] == [config["admin_cidr"]],
+                        "Unknown or changed authorized admin network scope")
         elif address.startswith(("google_compute_subnetwork", "google_compute_router")):
             require(values.get("region") == config["zone"].rsplit("-", 1)[0], "Foreign region")
 
@@ -108,12 +127,19 @@ def check_plan(plan, config, action):
             require(after["node_count"] == (0 if action == "pause" else 1), "Unexpected node count")
 
 
+def strict_bool(value):
+    if value not in ("true", "false"):
+        raise argparse.ArgumentTypeError("Expected exactly true or false")
+    return value == "true"
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["plan", "provision", "status", "pause", "resume", "destroy"])
     for key in ("app", "environment", "state-bucket", "project", "zone", "owner", "run", "billing-owner", "admin-cidr"):
         p.add_argument("--" + key, required=True)
     p.add_argument("--spot", action="store_true")
+    p.add_argument("--public-endpoint", type=strict_bool, default=False)
     p.add_argument("--authorize", help="Exact ACTION:PROJECT/ZONE/OWNER/RUN acknowledgment of a separately approved run")
     p.add_argument("--tofu", default="tofu", help="OpenTofu executable (must be 1.12.3)")
     return p
@@ -122,7 +148,7 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     config = {key: getattr(args, key) for key in
-              ("app", "environment", "state_bucket", "project", "zone", "owner", "run", "billing_owner", "admin_cidr", "spot")}
+              ("app", "environment", "state_bucket", "project", "zone", "owner", "run", "billing_owner", "admin_cidr", "spot", "public_endpoint")}
     validate(config)
     mutation = args.action not in ("plan", "status")
     if args.action != "status":

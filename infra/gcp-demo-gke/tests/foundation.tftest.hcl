@@ -1,4 +1,211 @@
 mock_provider "google" {}
+# 8.8.8.8 is a validation-only fixture, never an operator address or deployment input.
+run "public_admin_private_workers" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "8.8.8.8/32"
+  }
+  assert {
+    condition     = !google_container_cluster.demo.private_cluster_config[0].enable_private_endpoint && google_container_cluster.demo.private_cluster_config[0].enable_private_nodes
+    error_message = "Only the control plane may be public; workers must stay private."
+  }
+  assert {
+    condition     = length(google_container_cluster.demo.master_authorized_networks_config[0].cidr_blocks) == 1 && one(google_container_cluster.demo.master_authorized_networks_config[0].cidr_blocks).cidr_block == var.admin_cidr && !google_container_cluster.demo.master_authorized_networks_config[0].gcp_public_cidrs_access_enabled
+    error_message = "Only the explicit administrator /32 may be authorized."
+  }
+  assert {
+    condition     = output.deployment_config.public_endpoint && output.deployment_config.admin_cidr == var.admin_cidr
+    error_message = "Remote configuration must retain the exact endpoint mode and administrator CIDR."
+  }
+}
+
+run "reject_public_0" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "0.0.0.0/0"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_1" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "8.8.8.0/24"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_2" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "8.8.8.8/24"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_3" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "8.8.8.8"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_4" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "10.1.2.3/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_5" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "172.16.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_6" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "192.168.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_7" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "127.0.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_8" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "169.254.1.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_9" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "100.64.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_10" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "192.0.0.9/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_11" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "192.88.99.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_12" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "192.0.2.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_13" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "198.18.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_14" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "198.51.100.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_15" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "203.0.113.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_16" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "224.0.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_17" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "240.0.0.1/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_18" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "255.255.255.255/32"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_public_19" {
+  command = plan
+  variables {
+    public_endpoint = true
+    admin_cidr      = "::1/128"
+  }
+  expect_failures = [var.admin_cidr]
+}
+
+run "reject_private_noncanonical" {
+  command = plan
+  variables { admin_cidr = "10.40.0.5/24" }
+  expect_failures = [var.admin_cidr]
+}
+
 
 variables {
   app           = "ai"

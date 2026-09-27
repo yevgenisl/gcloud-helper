@@ -111,14 +111,15 @@ resource "google_container_cluster" "demo" {
   }
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = true
+    enable_private_endpoint = !var.public_endpoint
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
   master_authorized_networks_config {
     cidr_blocks {
       cidr_block   = var.admin_cidr
-      display_name = "approved-private-admin"
+      display_name = var.public_endpoint ? "approved-public-admin" : "approved-private-admin"
     }
+    gcp_public_cidrs_access_enabled      = false
     private_endpoint_enforcement_enabled = true
   }
   logging_config { enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"] }
@@ -173,9 +174,17 @@ output "private_endpoint" {
   value     = google_container_cluster.demo.private_cluster_config[0].private_endpoint
   sensitive = true
 }
+output "public_endpoint" {
+  value     = var.public_endpoint ? google_container_cluster.demo.private_cluster_config[0].public_endpoint : null
+  sensitive = true
+}
+output "selected_endpoint" {
+  value     = var.public_endpoint ? google_container_cluster.demo.private_cluster_config[0].public_endpoint : google_container_cluster.demo.private_cluster_config[0].private_endpoint
+  sensitive = true
+}
 output "node_service_account" { value = google_service_account.node.email }
 output "desired_nodes" { value = var.paused ? 0 : 1 }
 
 output "deployment_config" {
-  value = { app = var.app, environment = var.environment, state_bucket = var.state_bucket, project = var.project, zone = var.zone, owner = var.owner, run = var.run, billing_owner = var.billing_owner, admin_cidr = var.admin_cidr, spot = var.spot }
+  value = { app = var.app, environment = var.environment, state_bucket = var.state_bucket, project = var.project, zone = var.zone, owner = var.owner, run = var.run, billing_owner = var.billing_owner, admin_cidr = var.admin_cidr, spot = var.spot, public_endpoint = var.public_endpoint }
 }

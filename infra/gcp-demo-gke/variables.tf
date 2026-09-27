@@ -35,14 +35,28 @@ variable "billing_owner" {
 }
 variable "admin_cidr" {
   type        = string
-  description = "Narrow private RFC1918 source CIDR of an existing authenticated admin route (VPN/tunnel)."
+  description = "Canonical admin source: RFC1918 /24 or narrower privately; globally routable /32 publicly."
   validation {
-    condition = can(cidrnetmask(var.admin_cidr)) && can(regex("/(2[4-9]|3[0-2])$", var.admin_cidr)) && (
-      can(regex("^10\\.", var.admin_cidr)) || can(regex("^192\\.168\\.", var.admin_cidr)) ||
-      can(regex("^172\\.(1[6-9]|2[0-9]|3[01])\\.", var.admin_cidr))
-    )
-    error_message = "Admin CIDR must be RFC1918 IPv4, /24 or narrower. No public API endpoint is enabled."
+    condition = try(cidrnetmask(var.admin_cidr) != "" && "${cidrhost(var.admin_cidr, 0)}/${split("/", var.admin_cidr)[1]}" == var.admin_cidr && (
+      var.public_endpoint ? (
+        endswith(var.admin_cidr, "/32") && !anytrue([for blocked in [
+          "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+          "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+          "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4"
+        ] : cidrcontains(blocked, cidrhost(var.admin_cidr, 0))])
+        ) : (
+        tonumber(split("/", var.admin_cidr)[1]) >= 24 && anytrue([
+          for private in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] : cidrcontains(private, cidrhost(var.admin_cidr, 0))
+        ])
+      )
+    ), false)
+    error_message = "Admin CIDR must be canonical: RFC1918 /24 or narrower privately, globally routable IPv4 /32 publicly (no special-use addresses)."
   }
+}
+variable "public_endpoint" {
+  type        = bool
+  default     = false
+  description = "Explicit opt-in to public control-plane access only; workers remain private."
 }
 variable "spot" {
   type    = bool

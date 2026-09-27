@@ -8,7 +8,7 @@ Other VM entrypoints reject non-VM targets. `scripts/demo-gke.sh ACTION` also su
 plan/provision/status/pause/resume/destroy with exactly the same explicit arguments.
 
 Required CLI: --app --environment --state-bucket --project --zone --owner --run
---billing-owner --admin-cidr; optional --spot. Combined app-environment-owner-run must
+--billing-owner --admin-cidr; optional --spot and --public-endpoint true|false (default false). Combined app-environment-owner-run must
 fit the 30-character service-account limit. Choose distinct names for each application.
 Every action except status requires --authorize ACTION:APP/ENVIRONMENT/PROJECT/ZONE/OWNER/RUN/BUCKET.
 Acknowledgement is not permission: obtain human cloud authorization first. Plans read cloud
@@ -31,8 +31,43 @@ The stage copies only main.tf, variables.tf and the provider lockfile (never sou
 .env, credentials or state); generated inputs contain only this explicit infrastructure contract.
 Raw provider output/state must not be published as CI artifacts. No requested runtime hook is
 implemented or silently skipped here: Kubernetes manifests/secret references/hooks belong to
-caller downstream work. Private route, node readiness/logging/policy enforcement and live
+caller downstream work. Selected admin route, node readiness/logging/policy enforcement and live
 pause/resume/teardown require separately authorized acceptance.
+
+## Optional public control-plane endpoint
+
+Private control-plane access remains the default (`--public-endpoint false`) and requires
+canonical RFC1918 `--admin-cidr` /24 or narrower plus an independently configured private route.
+Explicit `--public-endpoint true` permits only one canonical globally routable IPv4 admin /32.
+Supply the administrator's approved egress IP manually; there is no IP discovery. Public /24s,
+broad ranges, RFC1918, loopback, CGNAT, link-local, documentation, multicast and reserved ranges
+are rejected. Tests use a validation-only public fixture, never an actual operator IP.
+Both modes keep `enable_private_nodes = true`, private endpoint enforcement and disable
+Google-public-CIDR access. This exposes only the GKE API, not workers, applications or Argo;
+no bastion, ingress, public worker IP or LoadBalancer Service is added. IAM/RBAC still apply.
+
+Endpoint mode and admin CIDR are immutable local/remote configuration, checked against both
+before/after cluster state/plan fields. Existing state/manifests missing the new field fail
+closed, even for private mode: no silent migration or in-place public exposure. Use the old
+reviewed pin and original inputs for separately authorized teardown, or obtain a separately
+reviewed state migration. For a new mode/CIDR use a new isolated run only after scope/spend
+approval; never bypass the guards by editing state or reusing an old namespace.
+
+Sensitive outputs `private_endpoint`, `public_endpoint` (null in private mode), and
+`selected_endpoint` must not be published with raw state. From the approved admin source,
+use a dedicated kubeconfig and explicit project/zone:
+
+```sh
+export KUBECONFIG="$(mktemp)"
+# Private mode only:
+gcloud container clusters get-credentials "$CLUSTER" --project "$PROJECT" --zone "$ZONE" --internal-ip
+# Public mode only: intentionally NO --internal-ip (selects the external IP endpoint).
+gcloud container clusters get-credentials "$CLUSTER" --project "$PROJECT" --zone "$ZONE"
+```
+
+These commands require separate live authorization. No connectivity was verified by offline
+tests; confirm allowed-source success and non-allowed-source denial in a bounded live run.
+A changed PR head does not inherit earlier deployment approval.
 
 Offline validation:
 ```

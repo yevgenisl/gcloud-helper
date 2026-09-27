@@ -13,7 +13,7 @@ assert SPEC is not None and SPEC.loader is not None
 lc = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(lc)
 CONFIG = dict(app="ai", environment="demo", state_bucket="test-state-bucket", project="test-project", zone="us-central1-a", owner="alice", run="demo",
-              billing_owner="team", admin_cidr="10.40.0.5/32", spot=False)
+              billing_owner="team", admin_cidr="10.40.0.5/32", spot=False, public_endpoint=False)
 POOL = dict(project="test-project", name="ai-demo-alice-demo", location="us-central1-a", node_count=1)
 
 
@@ -26,6 +26,25 @@ class Guards(unittest.TestCase):
     def test_valid_inputs(self):
         lc.validate(CONFIG)
         lc.validate(dict(CONFIG, spot=True))
+
+    def test_public_inputs_and_strict_boolean(self):
+        import argparse
+        lc.validate(dict(CONFIG, public_endpoint=True, admin_cidr="8.8.8.8/32"))  # fixture only
+        for value in ("false", 0, 1, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                lc.validate(dict(CONFIG, public_endpoint=value))
+        for value in ("", "True", "1", "yes", " false"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                lc.strict_bool(value)
+        self.assertIs(lc.strict_bool("false"), False)
+        self.assertIs(lc.strict_bool("true"), True)
+        for cidr in ("0.0.0.0/0", "8.8.8.0/24", "8.8.8.8/24", "8.8.8.8", "10.1.2.3/32",
+                     "172.16.0.1/32", "192.168.0.1/32", "127.0.0.1/32", "169.254.1.1/32",
+                     "100.64.0.1/32", "192.0.0.9/32", "192.88.99.1/32", "192.0.2.1/32",
+                     "198.18.0.1/32", "198.51.100.1/32", "203.0.113.1/32", "224.0.0.1/32",
+                     "240.0.0.1/32", "255.255.255.255/32", "::1/128"):
+            with self.subTest(cidr=cidr), self.assertRaises(ValueError):
+                lc.validate(dict(CONFIG, public_endpoint=True, admin_cidr=cidr))
 
     def test_invalid_inputs(self):
         for key, value in [("project", "../oops"), ("owner", "ALL"), ("run", "../../x"),
@@ -134,7 +153,7 @@ class Runner(unittest.TestCase):
     def args(self, action, authorize=True):
         result = [action]
         for key, value in CONFIG.items():
-            if key != "spot":
+            if key not in ("spot", "public_endpoint"):
                 result += ["--" + key.replace("_", "-"), value]
         if authorize:
             result += ["--authorize", f"{action}:{lc.identity(CONFIG)}"]
@@ -208,6 +227,39 @@ class Runner(unittest.TestCase):
         with self.assertRaises(ValueError):
             lc.main(args)
         self.assertEqual(self.calls, [])
+
+    def test_local_endpoint_switch_and_old_manifest_fail_closed(self):
+        self.seed()
+        args = self.args("provision") + ["--public-endpoint", "true"]
+        args[args.index("--admin-cidr") + 1] = "8.8.8.8/32"
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            lc.main(args)
+        legacy = dict(CONFIG)
+        del legacy["public_endpoint"]
+        (self.folder / "identity.json").write_text(json.dumps(legacy))
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            lc.main(self.args("provision"))
+        self.assertEqual(self.calls, [])
+
+    def test_remote_endpoint_switch_or_missing_field_fail_closed(self):
+        self.seed()
+        for value in (True, None):
+            remote = dict(CONFIG, public_endpoint=value)
+            if value is None:
+                del remote["public_endpoint"]
+            self.state["values"]["outputs"]["deployment_config"]["value"] = remote
+            with self.assertRaisesRegex(ValueError, "Remote run configuration"):
+                lc.main(self.args("provision"))
+        self.assertFalse(any("plan" in c or "apply" in c for c in self.calls))
+
+    def test_default_private_and_explicit_public_inputs(self):
+        lc.main(self.args("plan"))
+        self.assertIs(json.loads((self.folder / "inputs.json").read_text())["public_endpoint"], False)
+        (self.folder / "identity.json").unlink()
+        args = self.args("plan") + ["--public-endpoint", "true"]
+        args[args.index("--admin-cidr") + 1] = "8.8.8.8/32"
+        lc.main(args)
+        self.assertIs(json.loads((self.folder / "inputs.json").read_text())["public_endpoint"], True)
 
     def test_unexpected_files_refused(self):
         self.seed()
